@@ -67,7 +67,7 @@ The server can check neither kind, since it sees only ciphertext.
 | `AccountId` | JSON string | `acct_` + base64url of 15 random bytes: `^acct_[A-Za-z0-9_-]{20}$`. |
 | `PayeeId` | JSON string | `payee_` + 20 characters, as for `AccountId`. |
 | `RuleId` | JSON string | `rule_` + 20 characters, as for `AccountId`. |
-| `Label` | JSON string | A keyed PRF label (0005): base64url of 15 bytes, `^[A-Za-z0-9_-]{20}$`. |
+| `Label` | JSON string | A keyed PRF label ([LABELS.md](LABELS.md), 0005): base64url of 15 bytes, `^[A-Za-z0-9_-]{20}$`. |
 | `BlobRef` | JSON object | `{"blob": "B…", "dek": "…"}`. `blob` is a reeeductio blob ID, `^B[A-Za-z0-9_-]{43}$`. `dek` is the 32-byte AES-256 key from `encryptAndUploadBlob`, base64url with no padding (43 characters). |
 
 **Random and PRF identifiers are 15 bytes** (120 bits). The length is a multiple of 3
@@ -400,7 +400,7 @@ allocations.
 | `date` | `Date` | yes | |
 | `envelope` | `AccountId` | yes | An `equity` account with `envelope: true`. |
 | `amount`, `exp`, `cur` | amount | yes | Non-zero. Negative takes money out of the envelope. `cur` equals the envelope's `cur`. |
-| `idem` | `Label` | no | Present only on allocations materialized from the schedule: `label("allocation", "{envelope}\|{YYYY-MM}")`. |
+| `idem` | `Label` | no | Present only on allocations materialized from the schedule: `label("allocation/v1", "{envelope}\|{YYYY-MM}")`. |
 | `memo` | string | no | Non-empty. |
 
 Fold-time rules: the envelope rule above. Allocations are exempt from sum-to-zero. If two

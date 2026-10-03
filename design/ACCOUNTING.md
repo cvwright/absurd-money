@@ -280,6 +280,10 @@ ns_key(ns)      = derive_key(label_key, f"label key | {ns}")
 label(ns, s)    = base64url(HMAC-SHA256(ns_key(ns), utf8(s))[:15])
 ```
 
+The full derivation, the namespace registry (`import/v1`, `allocation/v1`,
+`recon-session/v1`, `price/v1`), and test vectors are pinned in [LABELS.md](LABELS.md)
+(0005).
+
 `label` does no normalization. Each namespace defines how its input string `s` is built,
 and normalizes only the user-derived fields in it: folding the case of an account ID or
 a `fitid` would merge distinct values. The `import/v1` input and its normalization are
@@ -335,7 +339,7 @@ lives in editable data; the IDs never move.
 | `ledger/budgets/{period}/{account}` | **gone** — allocations moved to the `budget` topic; intent lives at the fixed path `ledger/budget-schedule`, with no period in any path |
 | `ledger/payees/{id}` | **one document** at `ledger/payees`, random `payee_` IDs inside |
 | `ledger/staging/{id}` | **gone** — consumption is derived; see "Ingest" |
-| `data/ledger/recon/session/{account}` | `data/ledger/recon/session/{label("recon-session", acct_id)}` |
+| `data/ledger/recon/session/{account}` | `data/ledger/recon/session/{label("recon-session/v1", acct_id)}` |
 | `Acc_checking`, `Acc_food` | `acct_` + base64url(random 120 bits) |
 
 One general rule survives the removal of `txmeta`, and it is the easiest to wave through:
@@ -551,7 +555,7 @@ as import rules living in State while imported transactions are events.
 
 Materialization needs an idempotency key, or opening the app on a second device
 double-posts the month. Derive it:
-`label("allocation", f"{envelope}|{period}")` — the derive-for-idempotency rule from
+`label("allocation/v1", f"{envelope}|{month}")` — the derive-for-idempotency rule from
 "Opaque identifiers". The `budget` topic's own chain supplies CAS on the check-then-append.
 
 ### Why the schedule does not go in the chart document
@@ -1099,7 +1103,7 @@ price history does not go in the space. Cache it locally, with two refinements:
 - **Checkpoints carry the prices they used**, which is what makes a historical net-worth
   snapshot reproducible without retaining every quote.
 - **For a shared cache**, so two devices don't each fetch, use **Data** — one entry per
-  `(commodity, year)` at `label("price", "VTI|2026")`. Data has no chain and no history, so
+  `(commodity, year)` at `label("price/v1", "VTI|2026")`. Data has no chain and no history, so
   the writes never bloat replay, and losing it is harmless. Per-year documents also dodge
   Data's no-enumeration problem: a 10-year series is 10 point reads, not 2,500.
 

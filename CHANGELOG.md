@@ -36,6 +36,11 @@ All notable changes to this project are documented here. The format follows
   normalization (well-formed, NFKC, locale-free lowercase, a pinned whitespace set
   collapsed and trimmed, punctuation kept), `fitid` trimming, the exact label input for
   both import ID schemes, and test vectors (0004).
+- [design/LABELS.md](design/LABELS.md): the label PRF. HKDF-SHA256 from the space's
+  `symmetric_root` to a `label_key` and one key per namespace, HMAC-SHA256 truncated to
+  15 bytes, base64url. It pins the namespace registry and each namespace's input, rejects
+  ill-formed strings, and includes test vectors checked against Python and the SDK's
+  `@noble/hashes` (0005).
 
 ### Changed
 
@@ -46,6 +51,8 @@ All notable changes to this project are documented here. The format follows
   checkpoint reproducibility does (0003).
 - `label(ns, s)` does no normalization of its own. Each namespace normalizes only the
   user-derived fields of its input, so account IDs and `fitid`s keep their case (0004).
+- Every label namespace carries a version, like every message type: `allocation/v1`,
+  `recon-session/v1`, and `price/v1` (0005).
 
 - Amounts in the design doc's schema sketches are decimal strings, and every sketch
   carries `v` (0001).

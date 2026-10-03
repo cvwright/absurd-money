@@ -248,5 +248,5 @@ integer `i` at exponent `e`.
 | fitid `" 20260914-ABc01 "` | `acct_7bQ2xV9mKd4TnR1sYgLp\|fitid\|20260914-ABc01` |
 | fitid `" X​"` | `acct_7bQ2xV9mKd4TnR1sYgLp\|fitid\|X`U+200B |
 
-The `\|` are table escapes; each is a single `|` (U+007C). The HMAC itself depends on the
-key derivation in 0005 and isn't covered here.
+The `\|` are table escapes; each is a single `|` (U+007C). The labels these inputs hash to
+are in the test vectors in [LABELS.md](LABELS.md) (0005).

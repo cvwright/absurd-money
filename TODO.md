@@ -5,12 +5,6 @@ listed here. See [issues/README.md](issues/README.md) for the workflow.
 
 Next ID: 0033
 
-## Before writing code
-
-These are pinned once and can never change after the first message is posted.
-
-- [ ] 0005 Label PRF derivation and namespace strings
-
 ## Milestone 1: Core ledger
 
 - [ ] 0006 Project scaffold: Lit 3 + Vite PWA, linked to the reeeductio TypeScript SDK
