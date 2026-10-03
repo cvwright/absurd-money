@@ -16,3 +16,8 @@ All notable changes to this project are documented here. The format follows
 - Opening-balances entry, period close, and the positional lock rule.
 - Import consumption derived from journal `import_id` labels; dismissal via
   `ledger.dismiss`.
+- Payees get random IDs in one State document; import rules map raw merchant strings to
+  payees.
+- Client-side CSV import with local review; `import-staging` reserved for a possible
+  future bank-sync tool account.
+- Message `type` fields stay cleartext; the leakage is documented and accepted.

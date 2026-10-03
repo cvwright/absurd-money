@@ -59,8 +59,8 @@ cost was already paid. You may as well take the integrity guarantees that come w
 | **Tax lots** (quantity, cost basis, acquisition date) | **Message** in `journal` — the entry that created them | Identified `{message_hash}#{split_index}`. Remaining quantity is *derived* by folding disposals, never stored. |
 | **Market prices / quotes** | **Not in the space** — local cache, optionally **Data** per `(commodity, year)` | Externally sourced, non-authoritative, re-fetchable. Checkpoints carry the prices they used. |
 | **Receipts, statements, imported OFX/CSV files** | **Blob** (content-addressed, E2E-encrypted) | Dedup for free; same statement imported twice is one object. |
-| **Bank/institution sync connection** | **Tool account** with create-only capability | No ambient authority; see "Ingest". |
-| **Payees, tags, import rules** | **State** under `ledger/payees/{label}`, `ledger/rules/…` | Payee labels are *derived* from the normalized merchant string, so dedup is free. |
+| **Bank/institution sync connection** (future, if ever) | **Tool account** with create-only capability | No ambient authority; see "Ingest". |
+| **Payees, tags, import rules** | **State** — one document each, `ledger/payees` and `ledger/rules` | Payees get random IDs like accounts. Import rules map raw merchant strings to payees, so matching can improve without changing any ID. |
 | **UI cursors, "last sync at", projection watermarks** | **Data** (signed, no history) | Per-device scratch; history would be noise. |
 | **Spouse / bookkeeper / accountant access** | **Roles + capabilities** | Path-scoped. See "Shared books". |
 
@@ -73,8 +73,8 @@ concurrency domain**. That makes topic choice a concurrency decision, not just n
   `journal-2026` etc. (see "One ledger, yearly segments"); elsewhere in this note
   "`journal`" means the set of segments.
 - `checkpoints` — periodic signed balance snapshots. Written rarely, by one writer.
-- `import-staging` — raw bank transactions awaiting user approval. Written only by the
-  sync tool account, so its chain never contends with a human posting a transaction.
+- `import-staging` — reserved for a future bank-sync tool account, which may never be
+  built. Client-side CSV import does not use it. See "Ingest".
 - `recon` — completed statement reconciliations. See "Reconciliation is an event, not a
   flag".
 - `budget` — envelope allocations. See "Envelope budgeting".
@@ -305,10 +305,17 @@ hands you every binding, and renames touch only that document.
 The rule:
 
 - **Derive** when the point is to *recognize the same thing again with no index* —
-  institution import IDs (same `fitid` → same label → duplicate detected without a lookup),
-  and payees (same normalized merchant string → same payee, so dedup is free).
-- **Randomize** when identity must *survive renaming* — accounts, and anything a journal
-  entry cites.
+  import IDs (same `fitid`, or same CSV row, → same label → duplicate detected without a
+  lookup).
+- **Randomize** when identity must *survive renaming* — accounts, payees, and anything a
+  journal entry cites.
+
+Payees were originally on the derive side, keyed by the normalized merchant string. That
+fails on real bank data: `SQ *BLUE BOTTLE 0412` and `SQ *BLUE BOTTLE COFFEE 88` are the
+same payee, and no fixed normalization knows that — while any heuristic that improves
+would change every label. So payees get random IDs in one State document, and **import
+rules** (also one State document) map raw merchant strings to payees. The fuzzy matching
+lives in editable data; the IDs never move.
 
 ### Path rewrite
 
@@ -316,7 +323,7 @@ The rule:
 |---|---|
 | `ledger/txmeta/{txid}` | **gone** — edits moved to `ledger.edit` messages in `journal` |
 | `ledger/budgets/{period}/{account}` | **gone** — allocations moved to the `budget` topic; intent lives at the fixed path `ledger/budget-schedule`, with no period in any path |
-| `ledger/payees/{id}` | `ledger/payees/{label("payee", normalized_name)}` |
+| `ledger/payees/{id}` | **one document** at `ledger/payees`, random `payee_` IDs inside |
 | `ledger/staging/{id}` | **gone** — consumption is derived; see "Ingest" |
 | `data/ledger/recon/session/{account}` | `data/ledger/recon/session/{label("recon-session", acct_id)}` |
 | `Acc_checking`, `Acc_food` | `acct_` + base64url(random 128 bits) |
@@ -359,7 +366,11 @@ are validated against `^[a-zA-Z0-9._-]+$`
 PRF labels hide *what* an identifier means; they hide nothing about the shape of use. The
 server still observes: how many distinct account labels exist (the size of your chart),
 which labels are read and written most often (your primary checking account is the busy
-one), and write timing and frequency. Allocation events make the monthly budgeting cadence
+one), and write timing and frequency. Message `type` fields are cleartext, so the server
+also sees how many entries, edits, reversals, and dismissals you post. This is accepted
+rather than hidden: a PRF over a handful of type names still leaks the categories through
+their frequencies, and ciphertext size and timing would leak most of the rest anyway.
+Allocation events make the monthly budgeting cadence
 plain from timestamps alone, even though no path contains a period.
 Amounts and balances never appear, since every aggregate is folded client-side.
 
@@ -799,29 +810,44 @@ checkpoint message type early, add the writer when cold start starts to hurt.**
 
 ---
 
-## Ingest: bank sync as a tool account
+## Ingest
 
-The tool-account primitive fits ingest unusually well. A sync worker (Plaid/SimpleFIN puller, or an OFX/CSV importer) gets a
-**tool** identity whose capabilities are create-only on `topics/import-staging` plus
-`create` on blobs — and nothing else. It cannot read the journal, cannot touch the chart
-of accounts, cannot modify anything already written. If the worker is compromised, the
-blast radius is "junk appears in the staging queue".
+### CSV import, client-side
 
-It is also the **sole writer** of `import-staging`, so that chain never conflicts. The
-flow:
+The first and possibly only ingest path. The user's own client parses the file, so there
+is no trust boundary to enforce and no reason to involve `import-staging`:
 
-1. Worker uploads the raw statement as a blob, appends one staging message per
-   institution transaction, carrying the institution's own `fitid` as `import_id`.
-2. The user's client reads staging, applies categorization rules, matches against
-   existing entries (to catch the manually-entered transaction that just cleared), and
-   **the user approves**. Approval is the act that posts the balanced journal entry.
-3. Consumption is **derived, not stored.** A staging message is consumed iff some journal
-   entry carries its `import_id` label. "Ignore this one" (a duplicate, a pending charge
-   that never posted) is a `ledger.dismiss` message in `journal` citing the same label —
-   not in `import-staging`, which must keep the tool account as its sole writer. An
-   earlier sketch marked consumption in State at `ledger/staging/{label}`; that is one State
-   write per imported transaction, breaking the rule that nothing in State scales with
+1. Upload the raw CSV as a blob, so the source stays auditable.
+2. Parse it with the account's mapping profile, and compute an import ID per row:
+   the `fitid` when the file has one, otherwise one derived from the row itself (account,
+   date, amount, normalized description, and an occurrence count within that date). See
+   issue 0023 for the details and the pending-transaction problem.
+3. Drop rows whose import ID is already posted or dismissed in the projection.
+4. Review locally: apply import rules (merchant string → payee and category), match
+   against existing entries (to catch the manually entered transaction that just
+   cleared), and **the user approves**. Approval posts a `ledger.entry` carrying the
+   `import_id` label.
+5. Consumption is **derived, not stored.** A row is consumed iff some journal entry carries
+   its `import_id` label. "Ignore this one" (a duplicate, a pending charge that never
+   posted) is a `ledger.dismiss` message in `journal` citing the same label. An earlier
+   sketch marked consumption in State at `ledger/staging/{label}`; that is one State write
+   per imported transaction, breaking the rule that nothing in State scales with
    transaction count.
+
+### Bank sync as a tool account (future, maybe never)
+
+If automated bank sync is ever built, the tool-account primitive fits it unusually well. A
+sync worker (Plaid/SimpleFIN puller) gets a **tool** identity whose capabilities are
+create-only on `topics/import-staging` plus `create` on blobs — and nothing else. It
+cannot read the journal, cannot touch the chart of accounts, cannot modify anything
+already written. If the worker is compromised, the blast radius is "junk appears in the
+staging queue". It is also the **sole writer** of `import-staging`, so that chain never
+conflicts.
+
+The worker uploads the raw statement as a blob and appends one staging message per
+institution transaction, carrying the `fitid`. From there the flow is the CSV flow from
+step 3 on, reading rows from `import-staging` instead of a local file. Dismissals still go
+in `journal`, not `import-staging`, which must keep the tool account as its sole writer.
 
 Keeping approval client-side is what preserves the invariant that nothing enters the
 journal unbalanced or uncategorized — and the server could never check that anyway.
@@ -1120,8 +1146,8 @@ half-implemented:
    yearly `journal-YYYY` segments from the first post, so there is never a migration.
 2. **Statement reconciliation** as `recon` topic events, with the in-progress session kept
    local — proves the derive-don't-store discipline and the audit story.
-3. **CSV/OFX import** as a tool account with staging and user approval — proves the
-   capability scoping and the idempotency key.
+3. **CSV import**, client-side, with local review and approval — proves the idempotency
+   key and the rules-to-payee mapping. OFX later; a bank-sync tool account maybe never.
 4. **Envelope budgeting** — `budget` topic allocations plus the schedule document. Do this
    *after* the register view, since it is a fold over two topics and wants the projection
    working first.
@@ -1161,8 +1187,9 @@ half-implemented:
   which side absorbs the remainder.
 - **Normalization is part of the security boundary.** Derived labels only dedup if two
   clients normalize identically, and a normalization change silently mints new labels for
-  the same payee. Pin the exact algorithm (Unicode form, case folding, whitespace,
-  punctuation) and version it in the namespace string, e.g. `label("payee/v1", …)`.
+  the same import row. Pin the exact algorithm (Unicode form, case folding, whitespace,
+  punctuation) and version it in the namespace string, e.g. `label("import/v1", …)`.
+  Payees no longer depend on it, since they have random IDs.
 - **Checkpoint trust model.** Who may sign a checkpoint, how a client proves the cited
   chain hash is an ancestor of the current head without replaying to it, and what a
   client does on a mismatch. Needs to be pinned down before step 4.

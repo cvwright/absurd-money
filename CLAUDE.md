@@ -43,4 +43,15 @@ model.
 
 - Link to reeeductio code with GitHub URLs under
   `https://github.com/reeeductio/reeeductio/blob/main/`, never with relative paths.
-- Keep `CHANGELOG.md` (Unreleased) and `TODO.md` up to date as work lands.
+
+## Tracking work
+
+Issues live in the repo; the full workflow is in `issues/README.md`. Key rules:
+
+- `TODO.md` is the only place status lives. An issue is open if and only if it is listed
+  there.
+- IDs (`0007`) are stable and never reused; take the next one from `Next ID` in `TODO.md`.
+- Detail goes in an optional `issues/NNNN-slug.md`, kept forever.
+- To close an issue in the same change that implements it: remove its `TODO.md` line, add a
+  `CHANGELOG.md` entry citing the ID, and append `## Resolution` to its file if it has one.
+- When working on an issue, read `TODO.md` and that issue's file, not the whole folder.
