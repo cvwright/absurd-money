@@ -33,3 +33,25 @@ the derived import ID in 0023.
   rules** in `ledger/rules` map raw merchant strings to payees. The fuzzy matching lives in
   editable data; the IDs never move. Random was chosen over a PRF of the canonical name
   because it is simpler and survives renames. Design doc updated.
+
+## Resolution
+
+2026-10-03. Pinned in [design/NORMALIZATION.md](../design/NORMALIZATION.md), with test
+vectors.
+
+- Steps: well-formed (lone surrogates to U+FFFD), NFKC, `toLowerCase()` without a locale,
+  then collapse and trim an explicit 25-code-point whitespace set. Punctuation, control
+  and format characters, and accents are left alone.
+- Case: `toLowerCase()` rather than full case folding. They differ only where the spelling
+  changes (`ß` against `SS`, final sigma), which a re-export doesn't do. Lowercase is
+  native everywhere, so no folding table has to ship.
+- Whitespace is an explicit list, not `\s` or `trim()`, which differ across engines and
+  languages.
+- Checked that the function is idempotent, so rule patterns can be stored normalized. Node
+  (Unicode 17) and Python (Unicode 16) agree on every code point except 29 new in
+  Unicode 17; the accepted risk is documented.
+- Also pinned: the full label input for both 0023 schemes, and `fitid` normalization (trim
+  only, case kept). ACCOUNTING.md's `label` formula no longer normalizes the whole input,
+  which would have case-folded account IDs.
+- Deferred to [0020](0020-csv-parsing.md): pinning how the CSV's bytes are decoded into
+  text (a profile `encoding` field), since the normalization starts from decoded text.

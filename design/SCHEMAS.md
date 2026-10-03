@@ -612,7 +612,7 @@ Import rules, read in bulk at review time.
 |---|---|---|---|
 | `id` | `RuleId` | yes | Unique within the document. |
 | `op` | string | yes | `contains`, `prefix`, or `equals`. |
-| `pattern` | string | yes | Non-empty. Compared against the row's description after `import/v1` normalization (0004), and is itself stored normalized. |
+| `pattern` | string | yes | Non-empty. Compared against the row's description after `import/v1` normalization ([NORMALIZATION.md](NORMALIZATION.md)), and is itself stored normalized. |
 | `scope` | `AccountId` | no | Applies only to rows imported into this account. |
 | `payee` | `PayeeId` | no | |
 | `account` | `AccountId` | no | The category for the other side of the entry. |

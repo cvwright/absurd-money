@@ -9,7 +9,6 @@ Next ID: 0033
 
 These are pinned once and can never change after the first message is posted.
 
-- [ ] [0004](issues/0004-normalization.md) Normalization for derived import identifiers (`import/v1`)
 - [ ] 0005 Label PRF derivation and namespace strings
 
 ## Milestone 1: Core ledger
@@ -36,7 +35,7 @@ These are pinned once and can never change after the first message is posted.
 
 ## Milestone 3: CSV import
 
-- [ ] 0020 CSV parsing and mapping of columns to fields (mapping profiles: see 0023)
+- [ ] [0020](issues/0020-csv-parsing.md) CSV parsing and mapping of columns to fields (mapping profiles: see 0023)
 - [ ] 0021 Categorization rules stored in State
 - [ ] 0022 Staging review, matching against existing entries, and approval
 - [ ] [0023](issues/0023-import-idempotency.md) Idempotency via `import_id` labels; consumption derived, dismissal via

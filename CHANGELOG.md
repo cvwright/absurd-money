@@ -32,6 +32,10 @@ All notable changes to this project are documented here. The format follows
   the depleting draw takes the rest. It pins the order in which a lot's draws are checked,
   defines largest-remainder allocation and exact valuation, and includes test vectors
   (0003).
+- [design/NORMALIZATION.md](design/NORMALIZATION.md): the `import/v1` description
+  normalization (well-formed, NFKC, locale-free lowercase, a pinned whitespace set
+  collapsed and trimmed, punctuation kept), `fitid` trimming, the exact label input for
+  both import ID schemes, and test vectors (0004).
 
 ### Changed
 
@@ -40,6 +44,8 @@ All notable changes to this project are documented here. The format follows
 - A checkpoint's `rounding` field names ROUNDING.md. No `v: 1` checkpoint figure depends
   on rounding, since released basis is posted, so the design doc no longer claims that
   checkpoint reproducibility does (0003).
+- `label(ns, s)` does no normalization of its own. Each namespace normalizes only the
+  user-derived fields of its input, so account IDs and `fitid`s keep their case (0004).
 
 - Amounts in the design doc's schema sketches are decimal strings, and every sketch
   carries `v` (0001).

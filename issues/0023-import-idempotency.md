@@ -47,8 +47,10 @@ import_id = label("import/v1", "{account}|{date}|{amount}|{norm(description)}|#{
 - The account is part of the key, so the same transaction seen from both sides of a
   transfer (checking and the credit card) gets two different labels. Matching the two
   is the job of the review step's existing-entry matcher, not of idempotency.
-- Description normalization is a fixed, minimal algorithm (`import/v1`), specified in
-  0004. Payees don't depend on it; they have random IDs.
+- Description normalization is a fixed, minimal algorithm (`import/v1`), pinned with the
+  exact label input strings for both schemes in
+  [design/NORMALIZATION.md](../design/NORMALIZATION.md) (0004). A `fitid` is only
+  trimmed, never case-folded. Payees don't depend on it; they have random IDs.
 
 ## The flow for client-side CSV (milestone 3)
 

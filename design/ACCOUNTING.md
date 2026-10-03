@@ -277,8 +277,13 @@ strings, in the same two-level tree as `message key | {space}` → `topic key | 
 ```
 label_key       = derive_key(symmetric_root, f"label key | {space_id}")
 ns_key(ns)      = derive_key(label_key, f"label key | {ns}")
-label(ns, s)    = base64url(HMAC-SHA256(ns_key(ns), utf8(normalize(s)))[:15])
+label(ns, s)    = base64url(HMAC-SHA256(ns_key(ns), utf8(s))[:15])
 ```
+
+`label` does no normalization. Each namespace defines how its input string `s` is built,
+and normalizes only the user-derived fields in it: folding the case of an account ID or
+a `fitid` would merge distinct values. The `import/v1` input and its normalization are
+pinned in [NORMALIZATION.md](NORMALIZATION.md) (0004).
 
 120 bits truncated (15 bytes, so the base64url form is exactly 20 characters with no
 partial final character), one key per namespace so a label in one namespace can
@@ -1202,11 +1207,11 @@ half-implemented:
   at the lot cost's exponent, with the lot keeping the remainder until the depleting draw.
   Checkpoint reproducibility turned out not to depend on it, since released basis is
   posted.
-- **Normalization is part of the security boundary.** Derived labels only dedup if two
-  clients normalize identically, and a normalization change silently mints new labels for
-  the same import row. Pin the exact algorithm (Unicode form, case folding, whitespace,
-  punctuation) and version it in the namespace string, e.g. `label("import/v1", …)`.
-  Payees no longer depend on it, since they have random IDs.
+- **Normalization is part of the security boundary.** Resolved in
+  [NORMALIZATION.md](NORMALIZATION.md) (0004): NFKC, locale-free `toLowerCase`, a pinned
+  whitespace set collapsed and trimmed, and punctuation left alone. It is versioned in the
+  namespace string, `import/v1`, which also pins the whole label input. Payees don't
+  depend on it, since they have random IDs.
 - **Checkpoint trust model.** Who may sign a checkpoint, how a client proves the cited
   chain hash is an ancestor of the current head without replaying to it, and what a
   client does on a mismatch. Needs to be pinned down before step 4.
