@@ -1,0 +1,46 @@
+# Absurd Money
+
+Double-entry personal finance PWA on the end-to-end encrypted reeeductio Spaces API.
+The design is in `design/ACCOUNTING.md`. Read it before changing anything about the data
+model.
+
+## Stack
+
+- TypeScript (strict), Lit 3.x, Vite. Follows the conventions of `../music`.
+- reeeductio TypeScript SDK as a local dependency (`../../reeeductio/typescript-sdk`)
+- SQLite-WASM in OPFS for the local projection
+
+## Architecture
+
+- **Core** (`src/core/`): pure TypeScript with no DOM or network. Codec, label PRF,
+  validators, and folds. Covered by vitest unit tests.
+- **Sync**: SDK messages are decrypted into typed events.
+- **Projection**: events go into SQLite. The projection is a disposable cache that can
+  always be rebuilt from the log.
+- **UI**: Lit components that read from the projection.
+
+## Invariants
+
+- **No floats in ledger facts.** Amounts are `BigInt` in memory, decimal strings on the
+  wire, and `TEXT` in SQLite, with an explicit exponent per split. Floats are for display
+  only.
+- Every `ledger.entry` sums to exactly zero **per commodity**.
+- The journal is append-only. Fixes are reversals, `ledger.edit`, or new entries.
+- **Nothing whose write volume scales with transaction count goes in State.**
+- No user-derived string or raw `message_hash` appears in a path. Use the keyed PRF labels.
+- Account IDs are random, never derived from names.
+- Entries route to `journal-YYYY` by their date's year. Edits route to their target's
+  segment.
+- Everything needed to read a year lives in its segment or in State. See the topic-key
+  rules in the design doc's open questions.
+- Every message type carries a `v` field. Message schemas are permanent once posted.
+
+## Git
+
+- Do not commit. Leave changes in the working tree; the user reviews and commits them.
+
+## Docs
+
+- Link to reeeductio code with GitHub URLs under
+  `https://github.com/reeeductio/reeeductio/blob/main/`, never with relative paths.
+- Keep `CHANGELOG.md` (Unreleased) and `TODO.md` up to date as work lands.
