@@ -9,8 +9,6 @@ Next ID: 0033
 
 These are pinned once and can never change after the first message is posted.
 
-- [ ] 0002 Amount codec: `BigInt` in memory, decimal strings on the wire, explicit
-  exponent per split
 - [ ] 0003 Rounding policy: direction, scale, and which side absorbs the remainder
 - [ ] [0004](issues/0004-normalization.md) Normalization for derived import identifiers (`import/v1`)
 - [ ] 0005 Label PRF derivation and namespace strings

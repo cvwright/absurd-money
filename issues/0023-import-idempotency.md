@@ -36,6 +36,9 @@ the bank marks as pending, when the CSV says so.
 import_id = label("import/v1", "{account}|{date}|{amount}|{norm(description)}|#{n}")
 ```
 
+- `amount` is the canonical decimal form of the signed amount as posted to the account
+  (`-5`, not `-5.00`), pinned in [design/AMOUNTS.md](../design/AMOUNTS.md#canonical-decimal-form),
+  so changing a profile's `exp` doesn't mint new labels.
 - `n` = the 0-based count of earlier rows in the same file with the same
   `(date, amount, normalized description)`.
 - When an `fitid` is present (OFX, or a CSV that happens to have one), use

@@ -41,7 +41,9 @@ a disposable cache: it can always be rebuilt from the log. See "Design A" in
 - **Amounts are stored as `TEXT`** (decimal strings) or as integers on a coarser scale,
   never as an `INTEGER` holding a large-exponent value. SQLite integers are 64-bit, so
   wei overflows above roughly 9.2 ETH. Sums of amounts run in TypeScript with `BigInt`,
-  or in SQL only for currencies known to fit.
+  or in SQL only for currencies known to fit. An optional `approx REAL` column may back
+  sorting and range filters, as display data only. See "Projection" in
+  [design/AMOUNTS.md](../design/AMOUNTS.md#projection).
 - **There is a projection schema version.** If the version on disk doesn't match the
   code's, drop the database and replay. Never migrate a projection.
 - **Watermarks:** one high-water mark per topic (chain head hash plus `server_timestamp`).

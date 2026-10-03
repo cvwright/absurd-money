@@ -23,8 +23,15 @@ All notable changes to this project are documented here. The format follows
 - Message `type` fields stay cleartext; the leakage is documented and accepted.
 - [design/SCHEMAS.md](design/SCHEMAS.md): field-by-field `v: 1` schemas for every message
   type and State document, with post-time and fold-time validation rules (0001).
+- [design/AMOUNTS.md](design/AMOUNTS.md): the amount codec. Strict decoding, exact
+  arithmetic with no rounding, a text parser that never rounds, the canonical decimal form
+  hashed into `import/v1` labels, the projection encoding, and test vectors (0002).
+- `decimal` field on import profiles, for exports that use a decimal comma (0002).
 
 ### Changed
+
+- Amounts are compared by value, not spelling, everywhere a schema rule says "equals" or
+  "is zero" (0002).
 
 - Amounts in the design doc's schema sketches are decimal strings, and every sketch
   carries `v` (0001).

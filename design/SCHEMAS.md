@@ -84,9 +84,11 @@ birthday bound is negligible. Ten thousand random IDs collide with probability a
 
 An **amount** is always three fields together: `amount` (`Int`), `exp` (`Exp`), and `cur`
 (`Commodity`). Amounts are strings so that no JSON parser ever turns one into a double.
-Two amounts in the same commodity with different exponents are compared and summed after
-scaling both to the larger exponent. Parsing and arithmetic belong to the amount codec
-(0002).
+Amounts are compared by **value**, never by spelling: `"8400"` at exp 2 equals `"84"` at
+exp 0, and every "equals", "is zero", and "sums to zero" below means value equality. Two
+amounts in the same commodity with different exponents are compared and summed after
+scaling both to the larger exponent. Decoding, arithmetic, parsing, and the canonical
+decimal form are specified in [AMOUNTS.md](AMOUNTS.md) (0002).
 
 Where an amount is nested as its own object it is written `Amount`, meaning
 `{"amount": Int, "exp": Exp, "cur": Commodity}` with exactly those three fields.
@@ -643,6 +645,7 @@ A **`Profile`**:
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `delimiter` | string | yes | One character. |
+| `decimal` | string | no | `"."` (the default when absent) or `","`. The decimal separator in the amount column, for the parser in [AMOUNTS.md](AMOUNTS.md#parsing-text). |
 | `skip_rows` | number | yes | Lines to skip before the header or first row. |
 | `header` | boolean | yes | Whether the first row after `skip_rows` names the columns. |
 | `date` | `{column, format}` | yes | `format` is built from `YYYY`, `MM`, `DD`, `M`, `D` and literal separators. |
@@ -650,7 +653,7 @@ A **`Profile`**:
 | `description` | `{column}` | yes | |
 | `fitid` | `{column}` | no | When present, the import ID uses the fitid scheme (0023). |
 | `pending` | `{column, value}` | no | Rows whose `column` equals `value` are skipped as pending. |
-| `exp` | `Exp` | yes | Exponent the file's amounts are parsed at. The commodity is the account's `cur`. |
+| `exp` | `Exp` | yes | Exponent the file's amounts are parsed at. A cell with more non-zero fractional digits is an error, never rounded. The commodity is the account's `cur`. |
 
 A `column` is a header name (string) when `header` is true, and a 0-based index (number)
 otherwise.
