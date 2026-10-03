@@ -9,9 +9,6 @@ Next ID: 0033
 
 These are pinned once and can never change after the first message is posted.
 
-- [ ] [0001](issues/0001-message-schemas.md) Message schemas, each with a `v` field: `ledger.entry`, `ledger.edit`,
-  `ledger.reversal`, `ledger.dismiss`, `ledger.allocation`, `ledger.lotadjust`, recon,
-  and checkpoint/close
 - [ ] 0002 Amount codec: `BigInt` in memory, decimal strings on the wire, explicit
   exponent per split
 - [ ] 0003 Rounding policy: direction, scale, and which side absorbs the remainder

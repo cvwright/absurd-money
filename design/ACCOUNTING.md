@@ -91,20 +91,23 @@ cannot stall a transaction being entered on your laptop, and vice versa.
 
 **Space = one set of books.**
 
-A journal entry message (`type: "ledger.entry"`), encrypted before it leaves the client:
+A journal entry message (`type: "ledger.entry"`), encrypted before it leaves the client.
+The field-by-field spec for this and every other message type is
+[SCHEMAS.md](SCHEMAS.md).
 
 ```json
 {
+  "v": 1,
   "date": "2026-09-14",
-  "payee": "payee_kR3nQ8vZ1mH7bWxT2yLpAg",
+  "payee": "payee_kR3nQ8vZ1mH7bWxT2yLp",
   "memo": "groceries + household",
   "splits": [
-    {"account": "acct_7bQ2xV9mKd4TnR1sYgLpWz", "amount": -8423, "exp": 2, "cur": "USD"},
-    {"account": "acct_Lm3vT8cHq2NbXr5kYwPdZj", "amount":  6112, "exp": 2, "cur": "USD"},
-    {"account": "acct_9fKwR4tJmQ7vZx2LnBcHgY", "amount":  2311, "exp": 2, "cur": "USD"}
+    {"account": "acct_7bQ2xV9mKd4TnR1sYgLp", "amount": "-8423", "exp": 2, "cur": "USD",
+     "import_id": "Xk2mP9qR4tV7wY1zA3bC"},
+    {"account": "acct_Lm3vT8cHq2NbXr5kYwPd", "amount": "6112", "exp": 2, "cur": "USD"},
+    {"account": "acct_9fKwR4tJmQ7vZx2LnBcH", "amount": "2311", "exp": 2, "cur": "USD"}
   ],
-  "receipts": [{"blob": "B_9ac1…", "dek": "…"}],
-  "import_id": "ofx:…:fitid:12345"
+  "receipts": [{"blob": "B9ac1…", "dek": "…"}]
 }
 ```
 
@@ -116,13 +119,14 @@ Invariants the client enforces before posting (the server cannot — it sees cip
 
 - `sum(amount)` over splits is **exactly zero**, per currency, in integer minor units.
 - Every `account` resolves in the chart of accounts at the current state version.
-- `import_id`, when present, is unique — the idempotency key that stops a re-imported
-  statement from double-posting. It is stored as `label("staging", fitid)`, never the raw
-  institution ID, so the same statement is still recognized on re-import without the
-  server learning the institution's identifiers.
+- Each split's `import_id`, when present, is unconsumed — the idempotency key that stops a
+  re-imported statement from double-posting. It is a `label("import/v1", …)` (issue 0023),
+  never the raw institution ID, so the same statement is still recognized on re-import
+  without the server learning the institution's identifiers.
 
 **Corrections** never rewrite history. A `ledger.reversal` message cites a prior
-`message_hash` and posts the inverse splits; a `ledger.replacement` optionally follows.
+`message_hash` and posts the inverse splits; a replacement `ledger.entry` citing the
+original with `replaces` optionally follows.
 The register UI collapses the pair and shows the net, exactly as an accounting system
 does. "Delete this transaction" becomes "post a reversal" — which is both what the store
 permits and what bookkeeping requires. A reversal of an entry that has been edited (see
@@ -273,10 +277,11 @@ strings, in the same two-level tree as `message key | {space}` → `topic key | 
 ```
 label_key       = derive_key(symmetric_root, f"label key | {space_id}")
 ns_key(ns)      = derive_key(label_key, f"label key | {ns}")
-label(ns, s)    = base64url(HMAC-SHA256(ns_key(ns), utf8(normalize(s)))[:16])
+label(ns, s)    = base64url(HMAC-SHA256(ns_key(ns), utf8(normalize(s)))[:15])
 ```
 
-128 bits truncated, base64url, one key per namespace so a label in one namespace can
+120 bits truncated (15 bytes, so the base64url form is exactly 20 characters with no
+partial final character), one key per namespace so a label in one namespace can
 neither be correlated with nor used to test guesses in another.
 
 **It must be a keyed PRF, not a hash.** Every identifier in this app comes from a tiny,
@@ -297,7 +302,7 @@ the same ID.
 **Account IDs must not work that way.** Journal entries reference accounts forever, so an
 account's identity has to survive a rename or a re-parent. Derive `acct_` from the name and
 renaming *Groceries* to *Food* mints a new ID and orphans every historical entry
-referencing the old one. So **accounts get a random 128-bit ID at creation** — never a
+referencing the old one. So **accounts get a random 120-bit ID at creation** — never a
 derived one. The cost that usually makes people reach for derivation (needing a name→ID
 index) is already paid: the entire chart lives in one encrypted document, so one point read
 hands you every binding, and renames touch only that document.
@@ -326,7 +331,7 @@ lives in editable data; the IDs never move.
 | `ledger/payees/{id}` | **one document** at `ledger/payees`, random `payee_` IDs inside |
 | `ledger/staging/{id}` | **gone** — consumption is derived; see "Ingest" |
 | `data/ledger/recon/session/{account}` | `data/ledger/recon/session/{label("recon-session", acct_id)}` |
-| `Acc_checking`, `Acc_food` | `acct_` + base64url(random 128 bits) |
+| `Acc_checking`, `Acc_food` | `acct_` + base64url(random 120 bits) |
 
 One general rule survives the removal of `txmeta`, and it is the easiest to wave through:
 **never put a `message_hash` raw in a path.** A hash is opaque in content terms, so it
@@ -488,6 +493,10 @@ That yields a checkable invariant, the envelope analogue of splits-sum-to-zero:
 To Be Budgeted = Σ budgetable asset balances − Σ envelope available balances
 ```
 
+Credit cards count too: liabilities may be marked budgetable, and their (negative)
+balances enter the first sum. Otherwise a card purchase would lower an envelope without
+lowering any budgetable balance, and To Be Budgeted would rise.
+
 Paycheck of 1000 → cash 1000, TBB 1000. Allocate 600 → cash 1000, envelope 600, TBB 400.
 Spend 550 → cash 450, envelope 50, TBB = 450 − 50 = 400, unchanged — correct, since
 spending *from* an envelope must not change what is left to budget. Because TBB is
@@ -505,8 +514,8 @@ allocations, so the ledger stores facts.
 them:
 
 ```json
-{"date": "2025-12-01", "envelope": "acct_Lm3vT8cHq2NbXr5kYwPdZj",
- "amount": 70000, "exp": 2, "cur": "USD"}
+{"v": 1, "date": "2025-12-01", "envelope": "acct_Lm3vT8cHq2NbXr5kYwPd",
+ "amount": "70000", "exp": 2, "cur": "USD"}
 ```
 
 These are *earmarks, not money movements*, so they are deliberately exempt from the
@@ -519,11 +528,12 @@ nothing Jinja-shaped. It is a dated schedule the client reads and materializes f
 
 ```json
 {
+  "v": 1,
   "rev": 7,
   "envelopes": {
-    "acct_Lm3vT8cHq2NbXr5kYwPdZj": [
-      {"from": "2024-01", "monthly": 60000},
-      {"from": "2025-12", "monthly": 70000}
+    "acct_Lm3vT8cHq2NbXr5kYwPd": [
+      {"from": "2024-01", "amount": "60000", "exp": 2, "cur": "USD"},
+      {"from": "2025-12", "amount": "70000", "exp": 2, "cur": "USD"}
     ]
   }
 }
@@ -616,8 +626,10 @@ There are still no opening-balance entries: balances, lots, and envelopes fold o
 union of all segments, so segments are storage, not books. The rules that make that safe:
 
 - **Routing.** An entry goes to the segment of its `date`'s year. A `ledger.edit` goes to
-  its target's segment; so does a reversal of an entry whose segment is still open, dated
-  like the original. `ledger.dismiss` goes to the segment of the staging item's date.
+  its target's segment. A reversal is routed by its own date, which defaults to the
+  original's date when the original is unlocked and its segment is open (so it lands in
+  the same segment), and to today otherwise. `ledger.dismiss` goes to the segment of the
+  staging item's date.
 - **Lifecycle.** A segment is *open* until a **final close** — a close message in
   `checkpoints` citing that segment's head and marked final, typically after taxes are
   filed. Then it is *frozen* and the client refuses to write to it. From January until
@@ -684,12 +696,13 @@ chart in one state entry** at `ledger/accounts`:
 
 ```json
 {
+  "v": 1,
   "rev": 41,
   "accounts": {
-    "acct_7bQ2xV9mKd4TnR1sYgLpWz": {"name": "Checking",  "type": "asset",   "cur": "USD", "parent": null},
-    "acct_Lm3vT8cHq2NbXr5kYwPdZj": {"name": "Groceries", "type": "expense", "cur": "USD",
-                                    "parent": "acct_Qd8nY2rMw5TkVb7xHgLpZc"},
-    "acct_Zj4mH8qLv2NxRt6kYwPdBc": {"name": "Visa 4421", "type": "liability", "cur": "USD",
+    "acct_7bQ2xV9mKd4TnR1sYgLp": {"name": "Checking",  "type": "asset",   "cur": "USD", "parent": null},
+    "acct_Lm3vT8cHq2NbXr5kYwPd": {"name": "Groceries", "type": "expense", "cur": "USD",
+                                    "parent": "acct_Qd8nY2rMw5TkVb7xHgLp"},
+    "acct_Zj4mH8qLv2NxRt6kYwPd": {"name": "Visa 4421", "type": "liability", "cur": "USD",
                                     "parent": null, "closed_at": "2024-03-02"}
   }
 }
@@ -825,10 +838,11 @@ is no trust boundary to enforce and no reason to involve `import-staging`:
 3. Drop rows whose import ID is already posted or dismissed in the projection.
 4. Review locally: apply import rules (merchant string → payee and category), match
    against existing entries (to catch the manually entered transaction that just
-   cleared), and **the user approves**. Approval posts a `ledger.entry` carrying the
-   `import_id` label.
-5. Consumption is **derived, not stored.** A row is consumed iff some journal entry carries
-   its `import_id` label. "Ignore this one" (a duplicate, a pending charge that never
+   cleared, or the other side of a transfer), and **the user approves**. Approval posts a
+   `ledger.entry` whose split carries the `import_id` label; a match posts a `ledger.edit`
+   setting the label on the existing split. See [SCHEMAS.md](SCHEMAS.md).
+5. Consumption is **derived, not stored.** A row is consumed iff some split carries its
+   `import_id` label. "Ignore this one" (a duplicate, a pending charge that never
    posted) is a `ledger.dismiss` message in `journal` citing the same label. An earlier
    sketch marked consumption in State at `ledger/staging/{label}`; that is one State write
    per imported transaction, breaking the rule that nothing in State scales with

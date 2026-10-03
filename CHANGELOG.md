@@ -21,3 +21,16 @@ All notable changes to this project are documented here. The format follows
 - Client-side CSV import with local review; `import-staging` reserved for a possible
   future bank-sync tool account.
 - Message `type` fields stay cleartext; the leakage is documented and accepted.
+- [design/SCHEMAS.md](design/SCHEMAS.md): field-by-field `v: 1` schemas for every message
+  type and State document, with post-time and fold-time validation rules (0001).
+
+### Changed
+
+- Amounts in the design doc's schema sketches are decimal strings, and every sketch
+  carries `v` (0001).
+- `budgetable` may be set on liability accounts, so credit-card spending leaves To Be
+  Budgeted unchanged (0001).
+- A reversal is routed by its own date, defaulting to the original's date when the
+  original is unlocked and its segment is open (0001).
+- `ledger.replacement` is not a separate type; a replacement is a `ledger.entry` with
+  `replaces` (0001).

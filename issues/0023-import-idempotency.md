@@ -56,8 +56,10 @@ imports in their own client has no such boundary:
 1. Parse the CSV locally, apply the mapping profile, compute an import ID per row.
 2. Drop rows whose import ID is already in the projection (posted or dismissed).
 3. Review: apply rules, match against existing manual entries, and let the user approve.
-4. Approving posts a `ledger.entry` carrying `import_id`. Dismissing posts
-   `ledger.dismiss`.
+4. Approving posts a `ledger.entry` whose split carries `import_id`. Matching a row to a
+   split already in the journal posts a `ledger.edit` setting that split's `import_id`.
+   Dismissing posts `ledger.dismiss`. See "Import consumption and matching" in
+   [design/SCHEMAS.md](../design/SCHEMAS.md).
 
 The original CSV is uploaded as a blob and referenced from the entries, so the source
 stays auditable. The `import-staging` topic stays reserved for the tool-account bank
