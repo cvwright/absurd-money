@@ -156,7 +156,7 @@ A **`LotDraw`**:
 | `lot` | `LotId` | The lot drawn from. |
 | `qty` | `PosInt` | Quantity drawn, in the split's `exp` and `cur`. |
 | `acquired` | `Date` | Copied from the lot, so this segment alone supports Form 8949. |
-| `basis` | `Amount` | Basis released from this lot, computed by the rounding policy (0003). Copied for the same reason as `acquired`. |
+| `basis` | `Amount` | Basis released from this lot, computed by the rule in [ROUNDING.md](ROUNDING.md#basis-released-by-a-disposal) (0003). Copied for the same reason as `acquired`. |
 
 Fold-time rules:
 
@@ -174,9 +174,10 @@ Fold-time rules:
 - No two splits of an entry carry the same `import_id`.
 
 Lot problems (an unknown lot, an oversold lot, a `basis` that doesn't match the rounding
-policy) are anomalies in the lot fold. They never change the validity of the entry or
-any balance, because the lot's creating entry may sit in a segment the reader doesn't
-hold.
+policy) are anomalies in the lot fold, checked in the order given in
+[ROUNDING.md](ROUNDING.md#order-of-lot-events). They never change the validity of the
+entry or any balance, because the lot's creating entry may sit in a segment the reader
+doesn't hold.
 
 Post-time: no split posts to a closed account; `payee` exists in `ledger/payees`;
 no `import_id` is already consumed; the date's segment is open.
@@ -455,7 +456,7 @@ plus balances).
 |---|---|---|---|
 | `v` | `1` | yes | |
 | `period` | string | yes | Display label: `YYYY`, `YYYY-MM`, or `YYYY-Qn`. Locking is positional, so this only names the close. |
-| `rounding` | string | yes | The rounding policy (0003) used to compute everything in this message. `"v1"`. Required even on a bare close, so every checkpoint says how it was computed. |
+| `rounding` | string | yes | The rounding policy used to compute everything in this message. `"v1"`, which names [ROUNDING.md](ROUNDING.md) (0003). Every `v: 1` figure is a sum or a copy, so none depends on it yet. Required even on a bare close, so every checkpoint says how it was computed. |
 | `heads` | `Head[]` | yes | Non-empty, at most one per topic. |
 | `balances` | `Balance[]` | no | Full checkpoint: the balance of every account and commodity. |
 | `envelopes` | `EnvelopeBalance[]` | no | Full checkpoint: every envelope's available balance. |

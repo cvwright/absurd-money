@@ -27,11 +27,19 @@ All notable changes to this project are documented here. The format follows
   arithmetic with no rounding, a text parser that never rounds, the canonical decimal form
   hashed into `import/v1` labels, the projection encoding, and test vectors (0002).
 - `decimal` field on import profiles, for exports that use a decimal comma (0002).
+- [design/ROUNDING.md](design/ROUNDING.md): the rounding policy. Basis released by a
+  partial disposal is floored at the lot cost's exponent, the lot keeps the remainder, and
+  the depleting draw takes the rest. It pins the order in which a lot's draws are checked,
+  defines largest-remainder allocation and exact valuation, and includes test vectors
+  (0003).
 
 ### Changed
 
 - Amounts are compared by value, not spelling, everywhere a schema rule says "equals" or
   "is zero" (0002).
+- A checkpoint's `rounding` field names ROUNDING.md. No `v: 1` checkpoint figure depends
+  on rounding, since released basis is posted, so the design doc no longer claims that
+  checkpoint reproducibility does (0003).
 
 - Amounts in the design doc's schema sketches are decimal strings, and every sketch
   carries `v` (0001).

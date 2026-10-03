@@ -17,7 +17,7 @@ Some of this is permanent and some is not:
 | Projection encoding | No | The projection is a disposable cache. |
 
 The codec does **no rounding**. Every operation here is exact or fails. Multiplication,
-division, and rounding belong to the rounding policy (0003).
+division, and rounding are in [ROUNDING.md](ROUNDING.md) (0003).
 
 ## Representation
 
@@ -88,9 +88,9 @@ first.
 Results of `add` and `sub` are never rescaled down to strip trailing zeros. The exponent
 only ever grows, and it is capped at 30 because no input exceeds 30.
 
-There is no `mul` or `div`. A price times a quantity, or the basis released by a partial
-disposal, needs a rounding decision. That is 0003, which builds on `rescale` and
-`BigInt` division and names its result with the checkpoint's `rounding` version.
+There is no `mul` or `div` here. The basis released by a partial disposal, and splitting
+a total into parts, need a rounding rule. A price times a quantity is exact but isn't an
+`Amount`. All three are in [ROUNDING.md](ROUNDING.md) (0003).
 
 ## Choosing an exponent when writing
 

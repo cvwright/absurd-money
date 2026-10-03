@@ -785,14 +785,14 @@ means trusting its signer, so a checkpoint should be signed by a principal the r
 already trusts (ideally the space creator), and any client with full history should verify
 checkpoints against its own fold and shout loudly on mismatch.
 
-That verification imposes a requirement the additive parts of the ledger escape:
-**anything entering a checkpoint needs a pinned rounding policy.** Balances are pure sums
-and so are reproducible for free, but a checkpoint also carries market valuations, which
-are `quantity × price` — and basis figures, which involve the division above. Leave the
-rounding unspecified and two honest clients compute different checkpoints, firing the
-tamper alarm on nothing. Pin the policy (direction, scale, and where the remainder lands)
-and version it in the checkpoint, so a client can tell "computed differently" from
-"computed dishonestly." Checkpoints are also the
+That verification needs **every figure in a checkpoint to be reproducible**, or two
+honest clients compute different checkpoints and fire the tamper alarm on nothing.
+Balances are pure sums and so are reproducible for free. Lot basis turns out to be too:
+the basis released by each disposal is posted in the journal, so remaining basis is a sum
+of posted facts, however it was rounded. Market valuations (`quantity × price`) are exact
+products. The checkpoint still names its rounding policy, so that any future computed
+figure can say how it was computed and a client can tell "computed differently" from
+"computed dishonestly." See [ROUNDING.md](ROUNDING.md). Checkpoints are also the
 natural representation of a **closed accounting period**, which is a feature users want
 independently. Note the date in a journal entry is user-supplied while ordering is by
 server timestamp, so back-dated entries can arrive after a checkpoint covering their
@@ -1082,6 +1082,9 @@ take whatever is left. **Round one side and let the other absorb it**, so conser
 holds by construction rather than by luck. Basis remaining is then derived exactly as
 quantity remaining is: `lot_cost − Σ basis released`.
 
+The scale, the floor direction, the order in which a lot's draws are checked, and the
+test vectors are pinned in [ROUNDING.md](ROUNDING.md) (0003).
+
 ### Prices live outside the ledger
 
 Daily closes for 20 holdings over 10 years is ~50,000 points — it would dwarf a journal of
@@ -1195,10 +1198,10 @@ half-implemented:
   break that, but it rewrites every path in the space — and because the state log is
   append-only, the old labels stay in the log forever anyway. Probably not worth it; worth
   deciding explicitly rather than by omission.
-- **Pin the rounding policy early.** It is load-bearing in two places that only
-  *look* unrelated: basis conservation on partial disposal, and checkpoint reproducibility
-  across clients. Both want the same answer written down once — direction, scale, and
-  which side absorbs the remainder.
+- **Pin the rounding policy early.** Resolved in [ROUNDING.md](ROUNDING.md) (0003): floor
+  at the lot cost's exponent, with the lot keeping the remainder until the depleting draw.
+  Checkpoint reproducibility turned out not to depend on it, since released basis is
+  posted.
 - **Normalization is part of the security boundary.** Derived labels only dedup if two
   clients normalize identically, and a normalization change silently mints new labels for
   the same import row. Pin the exact algorithm (Unicode form, case folding, whitespace,
