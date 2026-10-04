@@ -128,7 +128,8 @@ Invariants the client enforces before posting (the server cannot — it sees cip
 `message_hash` and posts the inverse splits; a replacement `ledger.entry` citing the
 original with `replaces` optionally follows.
 The register UI collapses the pair and shows the net, exactly as an accounting system
-does. "Delete this transaction" becomes "post a reversal" — which is both what the store
+does, when both fall on the same date; a reversal dated later stays its own line, since
+it moved the balance in a later period. "Delete this transaction" becomes "post a reversal" — which is both what the store
 permits and what bookkeeping requires. A reversal of an entry that has been edited (see
 "Edits and recategorization") must post the inverse of the *effective* accounts, not the
 originally posted ones, or the reversal leaves one account debited and another credited. There is no delete-message endpoint, and for state

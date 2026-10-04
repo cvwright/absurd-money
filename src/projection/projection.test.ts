@@ -6,6 +6,7 @@ import { chartOf } from '@/core/chart.js';
 import { balances, balanceOf } from '@/core/fold/ledger.js';
 import { foldSegment, type RawMessage } from '@/core/fold/segment.js';
 import { stringifyJson } from '@/core/json.js';
+import type { MsgId } from '@/core/ids.js';
 import { encodeState } from '@/core/messages.js';
 import { A, accountsDoc, budgetDoc, E, entry, msg, usd } from '@/core/testing.js';
 import { Projection, PROJECTION_VERSION, type LogMessage } from './projection.js';
@@ -158,12 +159,117 @@ describe('Projection', () => {
       v: 1, date: '2026-02-01', reverses: food.hash, splits: [usd(A.checking, 900), usd(A.groceries, -900)],
     });
     p.append('journal-2026', [food]);
-    p.append('journal-2026', [rev]); // rewrites the target's row too
+    p.append('journal-2026', [rev]);
     expect(cents(p, A.checking)).toBe(0n);
     expect(p.register(A.checking)).toMatchObject([
       { txn: food.hash, kind: 'entry', reversedBy: rev.hash },
       { txn: rev.hash, kind: 'reversal', reverses: food.hash },
     ]);
+  });
+
+  it('links a reversal in a later segment, and keeps rows an edit there cannot touch', () => {
+    const p = Projection.open(memoryDb());
+    p.append('state', stateWith());
+    const food = chain(500)('food', 'ledger.entry', entry('2025-12-30', [usd(A.checking, -900), usd(A.groceries, 900)]));
+    p.append('journal-2025', [food]);
+    const j = chain();
+    const rev = j('rev', 'ledger.reversal', {
+      v: 1, date: '2026-01-05', reverses: food.hash, splits: [usd(A.checking, 900), usd(A.groceries, -900)],
+    });
+    // An edit may only name an entry in its own segment; this one is ignored.
+    const edit = j('edit', 'ledger.edit', { v: 1, edits: [{ target: food.hash, memo: 'x' }] });
+    p.append('journal-2026', [rev]);
+    p.append('journal-2026', [edit]);
+
+    const reg = p.register(A.checking, true); // different dates: nothing collapses
+    expect(reg).toMatchObject([
+      { txn: food.hash, reversedBy: rev.hash, balance: { amount: -900n } },
+      { txn: rev.hash, reverses: food.hash, balance: { amount: 0n } },
+    ]);
+    expect(p.reversalTarget(food.hash as MsgId)).toMatchObject({ reversedBy: rev.hash });
+  });
+
+  it('collapses a same-day reversal into its net, and lets a replacement stand for the pair', () => {
+    const p = Projection.open(memoryDb());
+    p.append('state', stateWith());
+    const j = chain();
+    const pay = j('pay', 'ledger.entry', entry('2026-02-01', [usd(A.checking, 5000), usd(A.salary, -5000)]));
+    const food = j('food', 'ledger.entry', entry('2026-02-01', [usd(A.checking, -900), usd(A.groceries, 900)]));
+    const coffee = j('coffee', 'ledger.entry', entry('2026-02-01', [usd(A.checking, -300), usd(A.dining, 300)]));
+    const rev = j('rev', 'ledger.reversal', {
+      v: 1, date: '2026-02-01', reverses: food.hash, splits: [usd(A.checking, 900), usd(A.groceries, -900)],
+    });
+    p.append('journal-2026', [pay, food, coffee, rev]);
+
+    expect(p.register(A.checking)).toHaveLength(4); // as posted
+    const reg = p.register(A.checking, true);
+    expect(reg.map((l) => [l.txn, l.amount.amount, l.balance.amount])).toEqual([
+      [pay.hash, 5000n, 5000n],
+      [coffee.hash, -300n, 4700n],
+      [food.hash, 0n, 4700n], // in the reversal's place
+    ]);
+    expect(reg[2]).toMatchObject({ kind: 'entry', collapsed: true, reversedBy: rev.hash, others: [A.groceries] });
+
+    const fixed = j('fixed', 'ledger.entry', entry('2026-02-02', [usd(A.checking, -950), usd(A.groceries, 950)], { replaces: food.hash }));
+    p.append('journal-2026', [fixed]);
+    expect(p.register(A.checking, true).map((l) => l.txn)).toEqual([pay.hash, coffee.hash, fixed.hash]);
+    expect(p.register(A.checking, true).at(-1)).toMatchObject({ replaces: food.hash, balance: { amount: 3750n } });
+  });
+
+  it('finds a reversal target with its effective accounts, lock, and freeze', () => {
+    const p = Projection.open(memoryDb());
+    p.append('state', stateWith());
+    const j = chain();
+    const food = j('food', 'ledger.entry', entry('2026-02-01', [usd(A.checking, -900), usd(A.groceries, 900)]));
+    const edit = j('edit', 'ledger.edit', { v: 1, edits: [{ target: food.hash, splits: { '1': A.dining } }] });
+    const later = j('later', 'ledger.entry', entry('2026-03-01', [usd(A.checking, -1), usd(A.dining, 1)]));
+    p.append('journal-2026', [food, edit, later]);
+
+    expect(p.reversalTarget(food.hash as MsgId)).toEqual({
+      id: food.hash,
+      date: '2026-02-01',
+      splits: [
+        { account: A.checking, amount: -900n, exp: 2, cur: USD },
+        { account: A.dining, amount: 900n, exp: 2, cur: USD },
+      ],
+      accounts: [A.checking, A.dining],
+      locked: false,
+      segmentOpen: true,
+    });
+    expect(p.reversalTarget(edit.hash as MsgId)).toBeUndefined();
+    expect(p.segmentOpen(2026)).toBe(true);
+
+    p.append('checkpoints', [
+      chain(50)('close', 'ledger.checkpoint', { v: 1, period: '2026-02', rounding: 'floor-v1', heads: [{ topic: 'journal-2026', hash: edit.hash }] }),
+    ]);
+    expect(p.reversalTarget(food.hash as MsgId)).toMatchObject({ locked: true, segmentOpen: true });
+    expect(p.reversalTarget(later.hash as MsgId)).toMatchObject({ locked: false });
+
+    p.append('checkpoints', [
+      chain(60)('final', 'ledger.checkpoint', { v: 1, period: '2026-12', rounding: 'floor-v1', heads: [{ topic: 'journal-2026', hash: later.hash, final: true }] }),
+    ].map((m) => ({ ...m, prev: msg('close') })));
+    expect(p.reversalTarget(later.hash as MsgId)).toMatchObject({ locked: true, segmentOpen: false });
+    expect(p.segmentOpen(2026)).toBe(false);
+  });
+
+  it('reports reversal anomalies across segments', () => {
+    const p = Projection.open(memoryDb());
+    p.append('state', stateWith());
+    const food = chain(500)('food', 'ledger.entry', entry('2025-12-30', [usd(A.checking, -900), usd(A.groceries, 900)]));
+    p.append('journal-2025', [food]);
+    const j = chain();
+    const splits = [usd(A.checking, 900), usd(A.groceries, -900)];
+    const rev1 = j('rev1', 'ledger.reversal', { v: 1, date: '2026-01-05', reverses: food.hash, splits });
+    const rev2 = j('rev2', 'ledger.reversal', {
+      v: 1, date: '2026-01-06', reverses: food.hash, splits: [usd(A.checking, 900), usd(A.dining, -900)],
+    });
+    p.append('journal-2026', [rev1, rev2]);
+    expect(p.anomalies()).toEqual([
+      { topic: 'journal-2026', kind: 'reversed-twice', msg: rev2.hash, detail: expect.any(String) },
+      { topic: 'journal-2026', kind: 'reversal-mismatch', msg: rev2.hash, detail: expect.any(String) },
+    ]);
+    // Both still fold.
+    expect(cents(p, A.checking)).toBe(900n);
   });
 
   it('locks entries at or before a checkpoint head', () => {

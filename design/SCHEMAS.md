@@ -227,7 +227,8 @@ Fold-time rules:
   basis). If the target drew from lots, those draws are void.
 - A target reversed more than once is an anomaly. Every reversal still folds.
 
-Post-time: the target is a `ledger.entry` and is not already reversed.
+Post-time: the target is a `ledger.entry` and is not already reversed; the splits are
+the inverse of its effective splits; the date's segment is open.
 
 There is no `ledger.replacement` type. A replacement is a `ledger.entry` with `replaces`
 set to the original entry's hash.

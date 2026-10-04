@@ -3,8 +3,9 @@
  * consumption. Inputs are `SegmentFold`s from segment.ts.
  */
 
-import { add, eq, neg, type Amount, type Commodity } from '../amount.js';
+import { add, type Amount, type Commodity } from '../amount.js';
 import type { AccountId, IsoDate, Label, MsgId } from '../ids.js';
+import { isInverse } from '../reversal.js';
 import type { Anomaly, EntryView, SegmentFold } from './segment.js';
 
 export type Balances = Map<AccountId, Map<Commodity, Amount>>;
@@ -94,12 +95,7 @@ export function reversalAnomalies(segments: readonly SegmentFold[]): Anomaly[] {
       }
       const target = findEntry(segments, targetId);
       if (!target) continue;
-      const ts = target.entry.splits;
-      const rs = r.reversal.splits;
-      const inverse =
-        ts.length === rs.length &&
-        rs.every((s, i) => s.account === target.accounts[i] && eq(s, neg(ts[i])));
-      if (!inverse) {
+      if (!isInverse({ splits: target.entry.splits, accounts: target.accounts }, r.reversal.splits)) {
         anomalies.push({ kind: 'reversal-mismatch', msg: r.id, detail: `splits are not the inverse of ${targetId}` });
       }
     }

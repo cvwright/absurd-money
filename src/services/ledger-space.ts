@@ -4,7 +4,7 @@
  * One set of books is one reeeductio space. This wraps the SDK's `Space` with the
  * ledger's operations. For now that is authentication, the chart of accounts
  * (`ledger/accounts`), the budget document (`ledger/budget`), the list of journal years
- * (`ledger/journal`), posting entries to the journal, reading a journal segment, and
+ * (`ledger/journal`), posting entries and reversals to the journal, reading a journal segment, and
  * fetching and decrypting messages for the sync (sync.ts); the other State documents come
  * in later issues.
  */
@@ -20,8 +20,9 @@ import { EMPTY_JOURNAL, journalUpdateProblems, withYear } from '@/core/journal.j
 import { parseJsonBytes } from '@/core/json.js';
 import {
   encodeMessage, isStatePath, TOPIC_TYPES, type AccountsDoc, type BudgetDoc, type Entry,
-  type MessageTypes,
+  type MessageTypes, type Reversal,
 } from '@/core/messages.js';
+import { reversalPostProblems, type ReversalTarget } from '@/core/reversal.js';
 import { entryPostProblems } from '@/core/validate.js';
 import type { LogMessage } from '@/projection/projection.js';
 import type { SpaceCredentials } from './credentials.js';
@@ -64,7 +65,7 @@ export function budgetSpec(chart: Chart): DocSpec<'ledger/budget'> {
   };
 }
 
-/** An entry broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
+/** An entry or reversal broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
 export class InvalidEntryError extends Error {
   constructor(readonly problems: readonly string[]) {
     super(problems.join('; '));
@@ -162,6 +163,22 @@ export class LedgerSpace {
     const problems = entryPostProblems(entry, { chart, segmentOpen: true });
     if (problems.length > 0) throw new InvalidEntryError(problems);
     return this.postToSegment(yearOf(entry.date), 'ledger.entry', entry);
+  }
+
+  /**
+   * Posts `reversal` to the `journal-YYYY` segment of its own date, after checking it
+   * against the post-time rules with the latest chart. `target` is the entry it reverses,
+   * as the projection holds it (`Projection.reversalTarget`), and `segmentOpen` says
+   * whether the reversal's own segment is open. Returns the new message's ID.
+   *
+   * Another device may reverse the same entry between the check and the post; the fold
+   * then reports the second reversal as an anomaly. A `ChainError` is not retried (0017).
+   */
+  async postReversal(reversal: Reversal, target: ReversalTarget | undefined, segmentOpen: boolean): Promise<MsgId> {
+    const chart = chartOf(await this.loadAccounts());
+    const problems = reversalPostProblems(reversal, { chart, target, segmentOpen });
+    if (problems.length > 0) throw new InvalidEntryError(problems);
+    return this.postToSegment(yearOf(reversal.date), 'ledger.reversal', reversal);
   }
 
   /**

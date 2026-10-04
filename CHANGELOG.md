@@ -105,6 +105,17 @@ All notable changes to this project are documented here. The format follows
   memo, and the transaction's other accounts. Reached from the nav or by clicking an
   account in the chart, and refreshed as the projection changes. Reversed entries and
   reversals are marked but not yet collapsed into their net (0014) (0013).
+- Reversals: a "Reverse" action on any unreversed entry in the register posts a
+  `ledger.reversal` with the inverse of the entry's effective splits (after edits), dated
+  the entry's own date unless it is locked or its segment is frozen, and then today. It is
+  checked against the post-time rules first: the target is a known, unreversed entry, the
+  splits are its inverse, and the reversal's segment is open. The register shows an entry
+  and its same-day reversal as one line with their net, in the reversal's place, and drops
+  a pair that nets to zero once a replacement entry (`replaces`) names it; the replacement
+  is marked "Corrected". A reversal on a later date stays its own line. "Show reversals"
+  lists every line as posted. The projection now links reversals to their targets across
+  segments and reports `reversed-twice` and `reversal-mismatch` anomalies across them too
+  (0014).
 
 ### Changed
 
@@ -137,3 +148,9 @@ All notable changes to this project are documented here. The format follows
   original is unlocked and its segment is open (0001).
 - `ledger.replacement` is not a separate type; a replacement is a `ledger.entry` with
   `replaces` (0001).
+
+### Fixed
+
+- Appending a `ledger.edit` that names an entry in another segment no longer deletes that
+  entry's rows from the projection until the next full refold. Such an edit is ignored,
+  and a refold now only rewrites rows in its own segment. `PROJECTION_VERSION` is 2 (0014).

@@ -270,7 +270,7 @@ export class MoneyApp extends LitElement {
         return html`<chart-view .ledger=${this.ledger!} .doc=${this.accounts!}
           .projection=${this.live!.projection}></chart-view>`;
       case 'register':
-        return html`<register-view .projection=${this.live!.projection} .doc=${this.accounts!}
+        return html`<register-view .projection=${this.live!.projection} .ledger=${this.ledger!} .doc=${this.accounts!}
           .account=${this.registerAccount}></register-view>`;
       case 'entry':
         return html`<entry-view .ledger=${this.ledger!} .doc=${this.accounts!}></entry-view>`;

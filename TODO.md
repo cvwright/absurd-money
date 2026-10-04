@@ -3,14 +3,15 @@
 Open issues, grouped by milestone, in priority order. An issue is open if and only if it is
 listed here. See [issues/README.md](issues/README.md) for the workflow.
 
-Next ID: 0042
+Next ID: 0043
 
 ## Milestone 1: Core ledger
 
 - [ ] 0039 Measure cold start against a seeded 10k-entry space, on desktop and on a phone
 - [ ] 0035 Warn before posting opening balances for an account that already has them
   (needs the projection)
-- [ ] 0014 Reversals
+- [ ] 0042 Reverse and re-enter: an entry form prefilled from the reversed entry, posted
+  with `replaces`
 - [ ] 0015 `ledger.edit`: recategorization (income/expense accounts only), memo, payee,
   receipts
 - [ ] 0036 Payees: choose or add a payee on manual entry, stored in `ledger/payees`
