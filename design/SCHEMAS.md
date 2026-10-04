@@ -581,6 +581,36 @@ Rules:
 - Accounts are never removed from the document; they are closed. An ID is never reused.
 - `type` and `cur` never change once written, because fold-time rules depend on them.
 
+### `ledger/journal`
+
+The years that have a `journal-YYYY` segment. The server has no route that lists topics,
+and an entry may be dated in any year, so this is how a client finds every segment (0011).
+
+```json
+{
+  "v": 1,
+  "rev": 3,
+  "years": [2024, 2025, 2026]
+}
+```
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `years` | number[] | yes | Integers from 0 to 9999, strictly ascending. |
+
+Rules:
+
+- **A year is listed before anything is posted to its segment.** A client adds the year,
+  then posts. If the post fails, the year is listed with an empty or missing segment,
+  which reads as no messages. Posting first could leave a segment that no client knows
+  to read.
+- Years are never removed, even from a segment that turned out empty.
+
+A segment posted by a client that skipped the first rule is invisible to every other
+client, so the rule is not optional. The list leaks nothing new, since topic IDs are
+already cleartext to the server. It is written about once per year, so its write volume
+doesn't scale with transaction count.
+
 ### `ledger/budget`
 
 Everything about envelope budgeting that is configuration rather than history: the

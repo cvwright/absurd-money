@@ -77,6 +77,15 @@ All notable changes to this project are documented here. The format follows
   takes the remainder, as in ledger-cli. What each commodity is out of balance by is shown
   while typing, and the entry is checked in full, then confirmed, before it posts. Closed
   accounts are not offered. Lots and payees are left to 0027 and 0036 (0010).
+- Journal segment discovery and reads. The server can't list topics, so a new State
+  document, `ledger/journal`, lists the years that have a `journal-YYYY` segment. A client
+  adds a year there before its first post to that segment, and years are never removed.
+  `LedgerSpace.loadJournalYears` reads the list, and `LedgerSpace.readSegment` fetches
+  every message of a year's segment (paged by timestamp), checks that they form one unbroken
+  hash chain, and returns them in chain order, decrypted and ready for `foldSegment`. A
+  payload that can't be decrypted or parsed is folded as malformed. Routing for
+  reversals, edits, and dismissals arrives with those message types (0014, 0015, 0023)
+  (0011).
 
 ### Changed
 

@@ -376,6 +376,13 @@ export interface AccountsDoc {
   readonly accounts: Readonly<Record<AccountId, Account>>;
 }
 
+/** The years that have a `journal-YYYY` segment, ascending. */
+export interface JournalDoc {
+  readonly v: 1;
+  readonly rev: number;
+  readonly years: readonly number[];
+}
+
 /** A monthly allocation from `from` until the next step, in the envelope's `cur`. */
 export interface ScheduleStep {
   readonly from: Month;
@@ -461,6 +468,18 @@ const account: Decoder<Account> = object(
 /** Shape only. The chart's cross-account rules are in chart.ts. */
 export const decodeAccountsDoc: Decoder<AccountsDoc> = versioned(
   object({ v: v1, rev, accounts: record(isAccountId, account) }),
+);
+
+const year = refine(count, (n) => (n <= 9999 ? undefined : 'expected a year from 0 to 9999'));
+
+export const decodeJournalDoc: Decoder<JournalDoc> = versioned(
+  object({
+    v: v1,
+    rev,
+    years: refine(arrayOf(year), (ys) =>
+      ys.every((y, i) => i === 0 || ys[i - 1] < y) ? undefined : 'years must be strictly ascending',
+    ),
+  }),
 );
 
 const scheduleStep: Decoder<ScheduleStep> = object({ from: month, amount: int, exp });
@@ -590,6 +609,7 @@ export type MessageType = keyof MessageTypes;
 
 export interface StateDocs {
   'ledger/accounts': AccountsDoc;
+  'ledger/journal': JournalDoc;
   'ledger/budget': BudgetDoc;
   'ledger/payees': PayeesDoc;
   'ledger/rules': RulesDoc;
@@ -610,6 +630,7 @@ const MESSAGE_DECODERS: { [T in MessageType]: Decoder<MessageTypes[T]> } = {
 
 const STATE_DECODERS: { [P in StatePath]: Decoder<StateDocs[P]> } = {
   'ledger/accounts': decodeAccountsDoc,
+  'ledger/journal': decodeJournalDoc,
   'ledger/budget': decodeBudgetDoc,
   'ledger/payees': decodePayeesDoc,
   'ledger/rules': decodeRulesDoc,

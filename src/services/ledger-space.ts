@@ -3,15 +3,24 @@
  *
  * One set of books is one reeeductio space. This wraps the SDK's `Space` with the
  * ledger's operations. For now that is authentication, the chart of accounts
- * (`ledger/accounts`), the budget document (`ledger/budget`), and posting entries to the
- * journal; reading the journal and the other State documents come in later issues.
+ * (`ledger/accounts`), the budget document (`ledger/budget`), the list of journal years
+ * (`ledger/journal`), posting entries to the journal, and reading a journal segment; the
+ * other State documents come in later issues.
  */
 
-import { ChainError, NotFoundError, Space } from 'reeeductio';
+import { ChainError, NotFoundError, Space, type Message } from 'reeeductio';
 import { budgetUpdateProblems, EMPTY_BUDGET } from '@/core/budget.js';
+import { chainOrder } from '@/core/chain.js';
 import { chartOf, chartUpdateProblems, EMPTY_CHART, type Chart } from '@/core/chart.js';
-import { segmentFor, type MsgId } from '@/core/ids.js';
-import { encodeMessage, type AccountsDoc, type BudgetDoc, type Entry } from '@/core/messages.js';
+import { CodecError } from '@/core/errors.js';
+import type { RawMessage } from '@/core/fold/segment.js';
+import { segmentOf, yearOf, type MsgId } from '@/core/ids.js';
+import { EMPTY_JOURNAL, journalUpdateProblems, withYear } from '@/core/journal.js';
+import { parseJsonBytes } from '@/core/json.js';
+import {
+  encodeMessage, TOPIC_TYPES, type AccountsDoc, type BudgetDoc, type Entry,
+  type MessageTypes,
+} from '@/core/messages.js';
 import { entryPostProblems } from '@/core/validate.js';
 import type { SpaceCredentials } from './credentials.js';
 import {
@@ -27,6 +36,17 @@ export const ACCOUNTS: DocSpec<'ledger/accounts'> = {
   empty: EMPTY_CHART,
   problems: chartUpdateProblems,
 };
+
+export const JOURNAL: DocSpec<'ledger/journal'> = {
+  path: 'ledger/journal',
+  empty: EMPTY_JOURNAL,
+  problems: journalUpdateProblems,
+};
+
+type JournalType = (typeof TOPIC_TYPES.journal)[number];
+
+/** The most messages the server returns per request. */
+const PAGE = 1000;
 
 /**
  * The budget document's spec, checked against `chart`. A chart read a moment ago is safe
@@ -54,6 +74,8 @@ export class LedgerSpace {
   readonly space: Space;
   private readonly state: StateBackend;
   private authPromise: Promise<void> | null = null;
+  /** Years seen listed in `ledger/journal`. Years are never removed, so this never goes stale. */
+  private readonly listedYears = new Set<number>();
 
   constructor(creds: SpaceCredentials) {
     this.space = new Space({
@@ -118,6 +140,13 @@ export class LedgerSpace {
     return updateDoc(this.state, budgetSpec(chart), edit);
   }
 
+  /** The years that have a `journal-YYYY` segment, ascending. */
+  async loadJournalYears(): Promise<readonly number[]> {
+    const { years } = await loadDoc(this.state, JOURNAL);
+    for (const y of years) this.listedYears.add(y);
+    return years;
+  }
+
   /**
    * Posts `entry` to the `journal-YYYY` segment of its date, after checking it against
    * the post-time rules with the latest chart. Returns the new message's ID.
@@ -130,12 +159,91 @@ export class LedgerSpace {
     // No segment can be frozen until the period close exists (0016).
     const problems = entryPostProblems(entry, { chart, segmentOpen: true });
     if (problems.length > 0) throw new InvalidEntryError(problems);
-    const topic = segmentFor(entry.date);
-    const data = new TextEncoder().encode(encodeMessage('ledger.entry', entry));
+    return this.postToSegment(yearOf(entry.date), 'ledger.entry', entry);
+  }
+
+  /**
+   * Posts `msg` to the segment of `year`, listing the year in `ledger/journal` first, so
+   * no segment exists that a reader can't find. The caller picks the year by the
+   * message type's routing rule (design/SCHEMAS.md).
+   */
+  private async postToSegment<T extends JournalType>(
+    year: number,
+    type: T,
+    msg: MessageTypes[T],
+  ): Promise<MsgId> {
+    const topic = segmentOf(year);
+    const data = new TextEncoder().encode(encodeMessage(type, msg));
+    await this.listYear(year);
     await this.authenticate();
     const prev = await topicHead(this.space, topic);
-    const { message_hash } = await this.space.postEncryptedMessage(topic, 'ledger.entry', data, prev);
+    const { message_hash } = await this.space.postEncryptedMessage(topic, type, data, prev);
     return message_hash as MsgId;
+  }
+
+  /** Makes sure `year` is listed in `ledger/journal`. Costs nothing once it has been seen. */
+  private async listYear(year: number): Promise<void> {
+    if (this.listedYears.has(year)) return;
+    // Read before writing, so a listed year doesn't cost a State write.
+    if ((await this.loadJournalYears()).includes(year)) return;
+    const { years } = await updateDoc(this.state, JOURNAL, (doc) => withYear(doc, year));
+    for (const y of years) this.listedYears.add(y);
+  }
+
+  /**
+   * Every message in the segment of `year`, decrypted, in chain order, ready for
+   * `foldSegment`. A segment that was never posted to is empty. A payload that can't be
+   * decrypted or parsed comes back with `error` set, for the fold to count as malformed.
+   *
+   * Throws `ChainBrokenError` if the messages don't form one chain.
+   */
+  async readSegment(year: number): Promise<RawMessage[]> {
+    const topic = segmentOf(year);
+    await this.authenticate();
+    const messages = chainOrder(await allMessages(this.space, topic), (m) => ({
+      hash: m.message_hash,
+      prev: m.prev_hash,
+    }));
+    return messages.map((m) => this.decrypt(m, topic));
+  }
+
+  private decrypt(m: Message, topic: string): RawMessage {
+    const id = m.message_hash as MsgId;
+    let bytes: Uint8Array;
+    try {
+      bytes = this.space.decryptMessageData(m, topic);
+    } catch {
+      return { id, type: m.type, data: undefined, error: 'payload could not be decrypted' };
+    }
+    try {
+      return { id, type: m.type, data: parseJsonBytes(bytes) };
+    } catch (err) {
+      if (err instanceof CodecError) return { id, type: m.type, data: undefined, error: err.message };
+      throw err;
+    }
+  }
+}
+
+/**
+ * Every message on `topic`, oldest first by server timestamp. `from` is inclusive, so
+ * each page after the first starts at the last page's newest timestamp and repeats are
+ * dropped by hash.
+ */
+async function allMessages(space: Space, topic: string): Promise<Message[]> {
+  const seen = new Map<string, Message>();
+  let from = 0;
+  for (;;) {
+    const { messages, has_more } = await space.getMessages(topic, { from, limit: PAGE }, { useCache: false });
+    let added = 0;
+    for (const m of messages) {
+      if (seen.has(m.message_hash)) continue;
+      seen.set(m.message_hash, m);
+      added++;
+      from = Math.max(from, m.server_timestamp);
+    }
+    if (!has_more) return [...seen.values()];
+    // Only possible if a whole page shares one timestamp, which paging by time can't get past.
+    if (added === 0) throw new Error(`${topic}: more than ${PAGE} messages share timestamp ${from}`);
   }
 }
 

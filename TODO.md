@@ -7,7 +7,6 @@ Next ID: 0039
 
 ## Milestone 1: Core ledger
 
-- [ ] 0011 Yearly `journal-YYYY` segments and routing
 - [ ] [0012](issues/0012-projection.md) Replay into a SQLite-WASM/OPFS projection, with live updates over WebSocket
 - [ ] 0013 Per-account register, sorted by entry date
 - [ ] 0035 Warn before posting opening balances for an account that already has them

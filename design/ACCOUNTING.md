@@ -350,8 +350,8 @@ design needs a per-message path, pass the hash through the PRF.
 
 ### Where cleartext stays, and why
 
-The small fixed vocabulary of structural segments — `ledger/`, `accounts`, `budget`,
-`payees`, `rules` — and the topic names `journal`, `recon`, `checkpoints`, `import-staging` stay
+The small fixed vocabulary of structural segments — `ledger/`, `accounts`, `journal`,
+`budget`, `payees`, `rules` — and the topic names `journal`, `recon`, `checkpoints`, `import-staging` stay
 cleartext. This is deliberate, and three verified facts drive it:
 
 1. **Capabilities are necessarily server-readable.** The server enforces authorization, so
@@ -665,6 +665,10 @@ union of all segments, so segments are storage, not books. The rules that make t
   original's date when the original is unlocked and its segment is open (so it lands in
   the same segment), and to today otherwise. `ledger.dismiss` goes to the segment of the
   staging item's date.
+- **Discovery.** There is no route that lists topics, so the years that have a segment
+  are listed in one State document, `ledger/journal`. A client adds a year there before
+  its first post to that segment, so no segment exists that a reader can't find. That is
+  one State write per year, not per transaction (0011).
 - **Lifecycle.** A segment is *open* until a **final close** — a close message in
   `checkpoints` citing that segment's head and marked final, typically after taxes are
   filed. Then it is *frozen* and the client refuses to write to it. From January until
@@ -1224,7 +1228,7 @@ half-implemented:
 - **Does state's single chain become the bottleneck?** Settled by construction:
   reconciliation is `recon` events, allocations are `budget` events, edits are
   `ledger.edit` journal events, and import consumption is derived. State holds only the
-  chart, the budget schedule, payees, and rules. The discipline to hold: **anything whose
+  chart, the list of journal years, the budget configuration, payees, and rules. The discipline to hold: **anything whose
   write volume scales with transaction count does not go in State**, because the log is
   append-only and its replay cost can never be pruned. A multi-path atomic state write
   would still be nice for general consistency, but nothing here needs it.

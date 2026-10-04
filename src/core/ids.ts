@@ -130,9 +130,10 @@ export const newEnvelopeId = (random15: Uint8Array) => `env_${id20(random15)}` a
 
 const SEGMENT_RE = /^journal-([0-9]{4})$/;
 
-/** The `journal-YYYY` topic an entry with this date routes to. */
-export function segmentFor(date: IsoDate): string {
-  return `journal-${date.slice(0, 4)}`;
+/** The `journal-YYYY` topic of `year`. */
+export function segmentOf(year: number): string {
+  if (!Number.isInteger(year) || year < 0 || year > 9999) throw new RangeError(`no segment for year ${year}`);
+  return `journal-${String(year).padStart(4, '0')}`;
 }
 
 /** The year of a `journal-YYYY` topic, or `undefined` if the topic isn't a segment. */

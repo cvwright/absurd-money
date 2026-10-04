@@ -21,6 +21,8 @@ export interface RawMessage {
   readonly id: MsgId;
   readonly type: string;
   readonly data: unknown;
+  /** Why the payload couldn't be decrypted or parsed, if it couldn't. It counts as malformed. */
+  readonly error?: string;
 }
 
 export type AnomalyKind =
@@ -126,7 +128,7 @@ export function foldSegment(
   let halted: SegmentFold['halted'];
 
   for (let index = 0; index < messages.length; index++) {
-    const { id, type, data } = messages[index];
+    const { id, type, data, error } = messages[index];
     if (index > frozenAfter) {
       anomalies.push({ kind: 'after-final-close', msg: id, detail: `posted after ${topic} was frozen` });
       continue;
@@ -135,6 +137,7 @@ export function foldSegment(
     let msg;
     try {
       if (!JOURNAL_TYPES.includes(type)) throw new UnknownTypeError(type);
+      if (error !== undefined) throw new CodecError(error);
       msg = decodeMessage(type, data);
     } catch (e) {
       if (e instanceof UnknownTypeError || e instanceof UnknownVersionError) {

@@ -31,6 +31,13 @@ describe('foldSegment', () => {
     expect(cents(b, A.groceries)).toBe(6112n);
   });
 
+  it('counts a payload that could not be decrypted as malformed', () => {
+    const opaque: RawMessage = { id: msg('opaque'), type: 'ledger.entry', data: undefined, error: 'decryption failed' };
+    const seg = foldSegment('journal-2026', [pay, opaque, e1], { chart });
+    expect([...seg.entries.keys()]).toEqual([pay.id, e1.id]);
+    expect(seg.anomalies).toEqual([{ kind: 'malformed', msg: opaque.id, detail: 'decryption failed' }]);
+  });
+
   it('halts at an unknown version or type', () => {
     const future = m('fut', 'ledger.entry', { v: 2 });
     const seg = foldSegment('journal-2026', [pay, future, e1], { chart });
