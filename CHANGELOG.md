@@ -54,6 +54,15 @@ All notable changes to this project are documented here. The format follows
   (edits, the positional lock, freezing), balances, reversal anomalies, import
   consumption, lots with the basis check, and the budget (envelope available, To Be
   Budgeted). Recon and checkpoint verification are left to 0018 and 0028 (0007).
+- Space creation and the chart of accounts. A new device can create a set of books (a
+  fresh key pair and symmetric root, with the space created on first authentication) and
+  is shown a recovery key once, or connect to existing books with the space ID and
+  recovery key. Credentials are kept in localStorage. The chart of accounts at
+  `ledger/accounts` is loaded with one point read and rewritten whole, with the post-time
+  rules checked before every write. Writes are compare-and-swap on the state chain's head,
+  so an edit that loses a race is re-applied to the winner's chart rather than
+  overwriting it. A first UI lists accounts by type and parent, and adds, renames,
+  closes, and reopens them (0008).
 
 ### Changed
 

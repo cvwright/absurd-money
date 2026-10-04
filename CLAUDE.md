@@ -20,6 +20,8 @@ model.
 - **Core** (`src/core/`): pure TypeScript with no DOM or network. Codec, label PRF,
   validators, and folds. Covered by vitest unit tests (`*.test.ts`, run in Node).
   ESLint enforces that core imports only other core modules and `@noble/hashes`.
+- **Services** (`src/services/`): the SDK boundary. Credentials, `LedgerSpace`, and the
+  State document store, whose CAS logic is tested against a fake backend.
 - **Sync**: SDK messages are decrypted into typed events.
 - **Projection**: events go into SQLite. The projection is a disposable cache that can
   always be rebuilt from the log.

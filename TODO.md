@@ -7,7 +7,6 @@ Next ID: 0033
 
 ## Milestone 1: Core ledger
 
-- [ ] 0008 Space creation, and loading/saving the chart of accounts document
 - [ ] 0009 Opening-balances entry
 - [ ] 0010 Manual entry with N splits, validated before posting
 - [ ] 0011 Yearly `journal-YYYY` segments and routing

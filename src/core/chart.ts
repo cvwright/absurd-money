@@ -8,6 +8,12 @@ import type { Account, AccountsDoc } from './messages.js';
 
 export type Chart = ReadonlyMap<AccountId, Account>;
 
+/**
+ * The chart before its first write. Its `rev` is 0, so the first write is rev 1. It is
+ * never written itself, and the decoder rejects it.
+ */
+export const EMPTY_CHART: AccountsDoc = { v: 1, rev: 0, accounts: {} };
+
 export function chartOf(doc: AccountsDoc): Chart {
   return new Map(Object.entries(doc.accounts) as [AccountId, Account][]);
 }

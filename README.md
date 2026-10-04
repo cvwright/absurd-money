@@ -11,7 +11,8 @@ the chain themselves instead of trusting an exported CSV.
 
 ## Status
 
-Early development. The project scaffold is in place, but there are no features yet. See
+Early development. You can create a set of books and edit its chart of accounts; there is
+no journal yet. See
 [design/ACCOUNTING.md](design/ACCOUNTING.md) for the data model and [TODO.md](TODO.md) for
 the roadmap.
 
@@ -21,6 +22,10 @@ The reeeductio SDK is a local dependency. Check out
 [reeeductio](https://github.com/reeeductio/reeeductio) next to the `absurdum` directory
 and build its SDK (`npm install && npm run build` in `typescript-sdk`) before installing
 here.
+
+Creating new books needs a server with `admin.auto_create_spaces: true` (the default dev
+config), since the space is created on first authentication. Copy `.env.example` to `.env`
+to change the server URL the setup screen starts with.
 
 - `npm run dev`: start the dev server
 - `npm run build`: type check and build
