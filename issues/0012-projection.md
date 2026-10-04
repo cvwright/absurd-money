@@ -63,3 +63,60 @@ a disposable cache: it can always be rebuilt from the log. See "Design A" in
 - An entry posted on one device shows up in another device's register through the
   WebSocket.
 - The behavior with two open tabs is defined and tested.
+
+## Resolution
+
+2026-10-04. Built in `src/projection/`, `src/services/sync.ts`, `stream.ts`, and
+`live-projection.ts`.
+
+The open questions:
+
+1. **Storage mode: `opfs-sahpool`**, from the official `@sqlite.org/sqlite-wasm`. It needs
+   no COOP/COEP headers, so nothing cross-origin can break, and it is the faster mode. The
+   only header change is `'wasm-unsafe-eval'` in `script-src`, which lets the worker
+   compile SQLite. wa-sqlite's multi-connection modes were not adopted: the exclusive lock
+   is handled by (2), and supporting several tabs is better done with (a) than with more
+   VFS machinery.
+2. **Several tabs: (b), with takeover.** The worker takes a Web Lock before opening the
+   database. A second tab says the books are open elsewhere and waits on the lock, then
+   opens when the first tab closes. The worker holds the lock, so it is released together
+   with the storage's file handles. Tested in `tab-lock.test.ts` against Node's Web Locks.
+   Option (a) is 0040.
+3. **Storing messages twice: no.** `LedgerSpace` never configured the SDK's IndexedDB
+   cache, and still doesn't. The log lives in SQLite with the folds, as decrypted payload
+   text plus the server envelope. The log and the folds are versioned separately, so a
+   projection schema change refolds locally (`PROJECTION_VERSION`) and only a log schema
+   change downloads again (`LOG_VERSION`). State messages outside the ledger's documents
+   are logged without their payloads, only to keep the state chain whole.
+4. **Where SQLite runs: a dedicated module worker.** Views call it through
+   `ProjectionClient`, and values cross by structured clone, which keeps `bigint` and
+   `Map`. Decryption still runs on the UI thread, in the sync (0041).
+
+Other choices:
+
+- A topic is always refolded whole with the core folds, in the same transaction as the
+  append and the watermark. When messages are appended to a segment and nothing else
+  changed, only the rows of the transactions they add, edit, or reverse are rewritten.
+  Chart and checkpoint changes refold every segment.
+- Checkpoint heads feed the segment folds' lock and freeze rules as they are. Who may sign
+  a checkpoint is still open (0028).
+- `register(account)` is the query for 0013. The chart of accounts shows balances, so a
+  post on one device updating another device's balance shows the WebSocket path working.
+- The projection holds decrypted books in OPFS. Signing out deletes it. Protecting it at
+  rest belongs with the keys (0033).
+
+Acceptance criteria:
+
+- 10k entries: about 0.5 s to replay and 0.1 s for one more live entry, measured in Node
+  (`projection.test.ts`). This excludes the network and decryption. Desktop and phone
+  measurements against a real space are 0039.
+- Reopening starts from the watermarks: tested in `projection.test.ts` and
+  `sync.test.ts`.
+- A schema change rebuilds cleanly: tested for both versions.
+- Live updates: the catch-up, gap, and ordering logic is tested against a fake server.
+  Not yet tried across two devices on a real server.
+- Two tabs: defined above, and tested.
+
+A headless Chrome run against the Vite dev server confirmed that the worker, the WASM,
+the OPFS SAH pool, persistence across opens, and the second-tab wait and takeover all
+work.

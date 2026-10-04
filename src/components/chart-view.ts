@@ -4,18 +4,22 @@
  * The chart of accounts: list by type and parent, add an account, rename, close, and
  * reopen. Every change rewrites the whole `ledger/accounts` document through
  * `LedgerSpace.updateAccounts`, which enforces the post-time rules, and fires
- * `accounts-changed` with the document written. Envelopes and budgetable accounts are in
+ * `accounts-changed` with the document written. Each account shows its balance from the
+ * projection, kept current as messages arrive. Envelopes and budgetable accounts are in
  * `ledger/budget`, managed by the budgeting issues (0024).
  */
 
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { isCommodity } from '@/core/amount.js';
+import { isCommodity, neg, type Commodity } from '@/core/amount.js';
+import type { Balances } from '@/core/fold/ledger.js';
 import { newAccountId, type AccountId } from '@/core/ids.js';
 import { ACCOUNT_TYPES, type Account, type AccountsDoc, type AccountType } from '@/core/messages.js';
+import type { ProjectionClient } from '@/projection/client.js';
 import type { LedgerSpace } from '@/services/ledger-space.js';
 import { InvalidDocError } from '@/services/state-store.js';
 import { today } from './dates.js';
+import { formatAmount } from './forms.js';
 
 const TYPE_LABELS: Record<AccountType, string> = {
   asset: 'Assets',
@@ -24,6 +28,9 @@ const TYPE_LABELS: Record<AccountType, string> = {
   income: 'Income',
   expense: 'Expenses',
 };
+
+/** Types whose balances are normally credits, shown with the sign flipped. */
+const CREDIT_NORMAL: ReadonlySet<AccountType> = new Set(['liability', 'equity', 'income']);
 
 interface Row {
   id: AccountId;
@@ -181,6 +188,12 @@ export class ChartView extends LitElement {
       text-decoration: line-through;
     }
 
+    .balance {
+      font-family: var(--font-family-mono);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
     .cur,
     .meta {
       color: var(--color-text-subdued);
@@ -207,12 +220,43 @@ export class ChartView extends LitElement {
 
   @property({ attribute: false }) ledger!: LedgerSpace;
   @property({ attribute: false }) doc!: AccountsDoc;
+  @property({ attribute: false }) projection?: ProjectionClient;
 
   @state() private showClosed = false;
   @state() private busy = false;
   @state() private error = '';
   @state() private newType: AccountType = 'asset';
   @state() private renaming: AccountId | null = null;
+  @state() private balances: Balances | null = null;
+
+  private readonly onChange = () => void this.loadBalances();
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.projection?.addEventListener('change', this.onChange);
+    void this.loadBalances();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.projection?.removeEventListener('change', this.onChange);
+  }
+
+  private async loadBalances() {
+    if (!this.projection) return;
+    try {
+      this.balances = await this.projection.call('balances');
+    } catch (err) {
+      console.warn('[chart-view] balances unavailable:', err);
+    }
+  }
+
+  private balanceText(id: AccountId, account: Account): string {
+    if (!this.balances) return '';
+    const cur = account.cur as Commodity;
+    const b = this.balances.get(id)?.get(cur) ?? { amount: 0n, exp: 0, cur };
+    return formatAmount(CREDIT_NORMAL.has(account.type) ? neg(b) : b);
+  }
 
   render() {
     return html`
@@ -273,6 +317,7 @@ export class ChartView extends LitElement {
               @blur=${() => (this.renaming = null)} />`
           : html`<span class="name">${account.name}</span>`}
         ${closed ? html`<span class="meta">closed ${account.closed_at}</span>` : nothing}
+        <span class="balance">${this.balanceText(id, account)}</span>
         <span class="cur">${account.cur}</span>
         <span class="actions">
           <button type="button" ?disabled=${this.busy} @click=${() => (this.renaming = id)}>Rename</button>

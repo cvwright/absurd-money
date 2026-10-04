@@ -5,7 +5,9 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig({
   server: {
     headers: {
-      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self' https: ws: wss:; worker-src 'self'; frame-ancestors 'none';",
+      // 'wasm-unsafe-eval' lets the projection worker compile SQLite's WebAssembly; it
+      // does not allow eval of JavaScript.
+      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self' https: ws: wss:; worker-src 'self'; frame-ancestors 'none';",
     },
   },
   resolve: {
@@ -15,6 +17,13 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
+  },
+  worker: {
+    format: 'es',
+  },
+  optimizeDeps: {
+    // SQLite finds its .wasm next to its own module, which pre-bundling would break.
+    exclude: ['@sqlite.org/sqlite-wasm'],
   },
   test: {
     // Core is pure TypeScript with no DOM, so tests run in Node.
@@ -28,7 +37,7 @@ export default defineConfig({
       workbox: {
         // Ledger data is end-to-end encrypted and lives in the projection, never in the
         // service worker cache. Only the app shell is precached.
-        globPatterns: ['**/*.{js,css,html,svg,woff,woff2}'],
+        globPatterns: ['**/*.{js,css,html,svg,woff,woff2,wasm}'],
       },
       devOptions: {
         enabled: true,

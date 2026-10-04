@@ -23,4 +23,10 @@ describe('chainOrder', () => {
     ];
     for (const msgs of broken) expect(() => chainOrder(msgs, id)).toThrow(ChainBrokenError);
   });
+
+  it('continues from a known head', () => {
+    expect(chainOrder([c, b], id, 'a')).toEqual([b, c]);
+    expect(() => chainOrder([a, b], id, 'a')).toThrow(ChainBrokenError); // a doesn't follow a
+    expect(() => chainOrder([c], id, 'a')).toThrow(ChainBrokenError); // gap
+  });
 });

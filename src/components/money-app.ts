@@ -2,9 +2,12 @@
  * Money App - Main Application Shell
  *
  * Root component. Without saved credentials it shows the setup view; with them it
- * connects to the space and shows the chart of accounts, a new entry, or the opening
- * balances. After creating a new space it shows the recovery key once, since nothing else
- * can bring the books back.
+ * connects to the space, opens the local projection and keeps it in sync, and shows the
+ * chart of accounts, a new entry, or the opening balances. After creating a new space it
+ * shows the recovery key once, since nothing else can bring the books back.
+ *
+ * Only one tab can have the projection open. Another tab waits, and takes over when
+ * that one closes.
  */
 
 import { LitElement, html, css } from 'lit';
@@ -21,6 +24,7 @@ import {
   type SpaceCredentials,
 } from '@/services/credentials.js';
 import { LedgerSpace } from '@/services/ledger-space.js';
+import { LiveProjection, type StatusEvent, type SyncStatus } from '@/services/live-projection.js';
 import type { ConnectDetail, CreateDetail, SetupView } from './setup-view.js';
 import './setup-view.js';
 import './chart-view.js';
@@ -32,6 +36,7 @@ setLogLevel(import.meta.env.DEV ? 'debug' : 'warn');
 type View =
   | { kind: 'setup' }
   | { kind: 'loading' }
+  | { kind: 'other-tab' }
   | { kind: 'backup'; key: string }
   | { kind: 'ready' }
   | { kind: 'failed'; error: string };
@@ -43,6 +48,13 @@ const PAGES: { page: Page; label: string }[] = [
   { page: 'entry', label: 'New entry' },
   { page: 'opening', label: 'Opening balances' },
 ];
+
+const STATUS_TEXT: Record<SyncStatus['kind'], string> = {
+  syncing: 'Syncing…',
+  live: 'Up to date',
+  offline: 'Offline',
+  failed: 'Sync failed',
+};
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -92,6 +104,16 @@ export class MoneyApp extends LitElement {
       text-overflow: ellipsis;
       white-space: nowrap;
       min-width: 0;
+    }
+
+    header .status {
+      color: var(--color-text-subdued);
+      font-size: var(--font-size-xs);
+      flex-shrink: 0;
+    }
+
+    header .status.failed {
+      color: var(--color-error);
     }
 
     header button {
@@ -178,6 +200,8 @@ export class MoneyApp extends LitElement {
 
   @state() private view: View = { kind: 'loading' };
   @state() private ledger: LedgerSpace | null = null;
+  @state() private live: LiveProjection | null = null;
+  @state() private syncStatus: SyncStatus = { kind: 'syncing' };
   @state() private accounts: AccountsDoc | null = null;
   @state() private page: Page = 'accounts';
   @query('setup-view') private setupView?: SetupView;
@@ -195,6 +219,13 @@ export class MoneyApp extends LitElement {
         return html`<setup-view @create-space=${this.create} @connect-space=${this.connect}></setup-view>`;
       case 'loading':
         return html`<div class="centered muted">Opening the books…</div>`;
+      case 'other-tab':
+        return html`
+          <div class="centered muted">
+            <p>These books are open in another tab.</p>
+            <p>Close that tab and this one will pick up where it left off.</p>
+          </div>
+        `;
       case 'failed':
         return html`
           <div class="centered">
@@ -210,6 +241,8 @@ export class MoneyApp extends LitElement {
           <header>
             <h1>Absurd Money</h1>
             <span class="space" title=${this.ledger!.spaceId}>${this.ledger!.spaceId}</span>
+            <span class="status ${this.syncStatus.kind}" role="status"
+              title=${this.syncStatus.kind === 'failed' ? this.syncStatus.error : ''}>${STATUS_TEXT[this.syncStatus.kind]}</span>
             <button @click=${this.signOut}>Sign out</button>
           </header>
           <nav>
@@ -228,7 +261,8 @@ export class MoneyApp extends LitElement {
   private renderPage() {
     switch (this.page) {
       case 'accounts':
-        return html`<chart-view .ledger=${this.ledger!} .doc=${this.accounts!}></chart-view>`;
+        return html`<chart-view .ledger=${this.ledger!} .doc=${this.accounts!}
+          .projection=${this.live!.projection}></chart-view>`;
       case 'entry':
         return html`<entry-view .ledger=${this.ledger!} .doc=${this.accounts!}></entry-view>`;
       case 'opening':
@@ -300,6 +334,11 @@ export class MoneyApp extends LitElement {
     const ledger = new LedgerSpace(creds);
     await ledger.authenticate();
     this.accounts = await ledger.loadAccounts();
+    const live = await LiveProjection.start(ledger, () => (this.view = { kind: 'other-tab' }));
+    live.addEventListener('status', (e) => (this.syncStatus = (e as StatusEvent).detail));
+    this.syncStatus = live.status;
+    this.live?.stop();
+    this.live = live;
     this.ledger = ledger;
   }
 
@@ -309,12 +348,19 @@ export class MoneyApp extends LitElement {
     else this.view = { kind: 'setup' };
   }
 
-  private signOut() {
+  private async signOut() {
     const ok = confirm(
       'Sign out of these books on this device? You will need the space ID and recovery key to open them again.',
     );
     if (!ok) return;
     clearCredentials();
+    // The projection holds the books decrypted, so it doesn't outlive the credentials.
+    try {
+      await this.live?.wipe();
+    } catch (err) {
+      console.warn('[money-app] could not delete the local database:', err);
+    }
+    this.live = null;
     this.ledger = null;
     this.accounts = null;
     this.view = { kind: 'setup' };

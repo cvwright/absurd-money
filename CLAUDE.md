@@ -22,9 +22,12 @@ model.
   ESLint enforces that core imports only other core modules and `@noble/hashes`.
 - **Services** (`src/services/`): the SDK boundary. Credentials, `LedgerSpace`, and the
   State document store, whose CAS logic is tested against a fake backend.
-- **Sync**: SDK messages are decrypted into typed events.
-- **Projection**: events go into SQLite. The projection is a disposable cache that can
-  always be rebuilt from the log.
+- **Sync** (`src/services/sync.ts`): SDK messages are decrypted and appended to the
+  projection's log, caught up from watermarks, then live over the WebSocket.
+- **Projection** (`src/projection/`): events go into SQLite (in a worker, OPFS
+  `opfs-sahpool`). The projection is a disposable cache that can always be rebuilt from
+  the log. Bump `PROJECTION_VERSION` when the fold tables change; never migrate them.
+  Tests run against in-memory SQLite in Node.
 - **UI**: Lit components that read from the projection.
 
 ## Invariants

@@ -674,6 +674,10 @@ export function encodeMessage<T extends MessageType>(type: T, msg: MessageTypes[
   return stringifyJson(msg);
 }
 
+export function isStatePath(path: string): path is StatePath {
+  return Object.hasOwn(STATE_DECODERS, path);
+}
+
 export function decodeState<P extends StatePath>(path: P, data: unknown): StateDocs[P] {
   return STATE_DECODERS[path](data, '');
 }

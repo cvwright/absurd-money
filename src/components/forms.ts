@@ -2,7 +2,7 @@
  * Helpers shared by the forms that build entries.
  */
 
-import { parseDecimal, type Decimal } from '@/core/amount.js';
+import { minor, parseDecimal, writerExp, type Amount, type Decimal } from '@/core/amount.js';
 import { ParseError } from '@/core/errors.js';
 import { InvalidEntryError } from '@/services/ledger-space.js';
 import { InvalidDocError } from '@/services/state-store.js';
@@ -32,4 +32,17 @@ export function comparePaths(x: readonly string[], y: readonly string[]): number
     if (c !== 0) return c;
   }
   return x.length - y.length;
+}
+
+/**
+ * An amount for display, at the commodity's minor unit or finer if it needs more digits.
+ * Exact: it formats the `bigint`, never a float.
+ */
+export function formatAmount(a: Amount): string {
+  const w = writerExp(a, minor(a.cur));
+  const negative = w.amount < 0n;
+  const digits = (negative ? -w.amount : w.amount).toString().padStart(w.exp + 1, '0');
+  const int = digits.slice(0, digits.length - w.exp);
+  const frac = digits.slice(digits.length - w.exp);
+  return (negative ? '−' : '') + int + (frac ? `.${frac}` : '');
 }

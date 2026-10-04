@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",
+    "@sqlite.org/sqlite-wasm": "^3.53.4-build2",
     "lit": "^3.3.3",
     "reeeductio": "file:../../reeeductio/typescript-sdk"
   },

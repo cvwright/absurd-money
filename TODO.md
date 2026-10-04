@@ -3,11 +3,11 @@
 Open issues, grouped by milestone, in priority order. An issue is open if and only if it is
 listed here. See [issues/README.md](issues/README.md) for the workflow.
 
-Next ID: 0039
+Next ID: 0042
 
 ## Milestone 1: Core ledger
 
-- [ ] [0012](issues/0012-projection.md) Replay into a SQLite-WASM/OPFS projection, with live updates over WebSocket
+- [ ] 0039 Measure cold start against a seeded 10k-entry space, on desktop and on a phone
 - [ ] 0013 Per-account register, sorted by entry date
 - [ ] 0035 Warn before posting opening balances for an account that already has them
   (needs the projection)
@@ -45,6 +45,9 @@ Next ID: 0039
 - [ ] 0027 Investments: commodity accounts, lots, derived lot depletion. Write the
   basis-conservation tests first.
 - [ ] 0028 Checkpoint writer and cold start from checkpoints
+- [ ] 0040 Several tabs: one owns the projection, the others query it over
+  `BroadcastChannel` and take over when it closes
+- [ ] 0041 Decrypt sync messages in the projection worker, not on the UI thread
 - [ ] 0029 OFX/QFX import
 - [ ] 0030 Bank sync as a tool account (SimpleFIN or Plaid). Maybe never.
 - [ ] [0034](issues/0034-non-extractable-keys.md) Non-extractable WebCrypto keys in memory (needs an SDK change)

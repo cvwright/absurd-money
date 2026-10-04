@@ -4,8 +4,9 @@
  * One set of books is one reeeductio space. This wraps the SDK's `Space` with the
  * ledger's operations. For now that is authentication, the chart of accounts
  * (`ledger/accounts`), the budget document (`ledger/budget`), the list of journal years
- * (`ledger/journal`), posting entries to the journal, and reading a journal segment; the
- * other State documents come in later issues.
+ * (`ledger/journal`), posting entries to the journal, reading a journal segment, and
+ * fetching and decrypting messages for the sync (sync.ts); the other State documents come
+ * in later issues.
  */
 
 import { ChainError, NotFoundError, Space, type Message } from 'reeeductio';
@@ -18,10 +19,11 @@ import { segmentOf, yearOf, type MsgId } from '@/core/ids.js';
 import { EMPTY_JOURNAL, journalUpdateProblems, withYear } from '@/core/journal.js';
 import { parseJsonBytes } from '@/core/json.js';
 import {
-  encodeMessage, TOPIC_TYPES, type AccountsDoc, type BudgetDoc, type Entry,
+  encodeMessage, isStatePath, TOPIC_TYPES, type AccountsDoc, type BudgetDoc, type Entry,
   type MessageTypes,
 } from '@/core/messages.js';
 import { entryPostProblems } from '@/core/validate.js';
+import type { LogMessage } from '@/projection/projection.js';
 import type { SpaceCredentials } from './credentials.js';
 import {
   loadDoc,
@@ -207,6 +209,47 @@ export class LedgerSpace {
     return messages.map((m) => this.decrypt(m, topic));
   }
 
+  /** Every message on `topic` with a `server_timestamp` of `from` or later. For the sync. */
+  async fetchSince(topic: string, from: number): Promise<Message[]> {
+    await this.authenticate();
+    return allMessages(this.space, topic, from);
+  }
+
+  /**
+   * `m` as the projection's log keeps it. State messages outside the ledger's documents
+   * (membership, capabilities) aren't ours to decrypt; they are logged only to keep the
+   * state chain whole.
+   */
+  toLog(m: Message): LogMessage {
+    const envelope = { hash: m.message_hash, prev: m.prev_hash, type: m.type, sender: m.sender, ts: m.server_timestamp };
+    if (m.topic_id === 'state' && !isStatePath(m.type)) return envelope;
+    let bytes: Uint8Array;
+    try {
+      bytes = this.space.decryptMessageData(m, m.topic_id);
+    } catch {
+      return { ...envelope, error: 'payload could not be decrypted' };
+    }
+    try {
+      return { ...envelope, body: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) };
+    } catch {
+      return { ...envelope, error: 'invalid UTF-8' };
+    }
+  }
+
+  /** The WebSocket URL of the space's message stream, with a fresh token. */
+  async streamUrl(): Promise<string> {
+    await this.authenticate();
+    return this.space.getWebSocketConnectionUrl();
+  }
+
+  /**
+   * Checks a message from the stream: its hash must be the hash of its contents. Messages
+   * fetched over HTTP are checked by the SDK.
+   */
+  verify(m: Message): Promise<void> {
+    return this.space.handleIncomingMessage(m);
+  }
+
   private decrypt(m: Message, topic: string): RawMessage {
     const id = m.message_hash as MsgId;
     let bytes: Uint8Array;
@@ -225,13 +268,12 @@ export class LedgerSpace {
 }
 
 /**
- * Every message on `topic`, oldest first by server timestamp. `from` is inclusive, so
- * each page after the first starts at the last page's newest timestamp and repeats are
- * dropped by hash.
+ * Every message on `topic` from timestamp `from` on, oldest first by server timestamp.
+ * `from` is inclusive, so each page after the first starts at the last page's newest
+ * timestamp and repeats are dropped by hash.
  */
-async function allMessages(space: Space, topic: string): Promise<Message[]> {
+async function allMessages(space: Space, topic: string, from = 0): Promise<Message[]> {
   const seen = new Map<string, Message>();
-  let from = 0;
   for (;;) {
     const { messages, has_more } = await space.getMessages(topic, { from, limit: PAGE }, { useCache: false });
     let added = 0;

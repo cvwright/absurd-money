@@ -86,6 +86,20 @@ All notable changes to this project are documented here. The format follows
   payload that can't be decrypted or parsed is folded as malformed. Routing for
   reversals, edits, and dismissals arrives with those message types (0014, 0015, 0023)
   (0011).
+- The local projection (`src/projection/`). A SQLite database in OPFS, run in a worker,
+  holds every replayed message of `state`, `checkpoints`, `budget`, `recon`, and each
+  `journal-YYYY` segment, with payloads decrypted, plus the folds of them: transactions
+  and postings with edits applied, per-segment balances, envelope allocations, checkpoint
+  heads, anomalies, and halts. The log and the folds are versioned separately: a new
+  projection version refolds from the local log, and a new log version downloads again.
+  Amounts are `TEXT`, and sums run in `bigint`. Each topic has a watermark (head hash and
+  `server_timestamp`), so reopening catches up from there. Live updates come over the
+  WebSocket stream; a message that doesn't continue its chain makes that topic catch up,
+  and live messages wait for any catch-up in progress. Only one tab opens the database; a
+  second tab says so and takes over when the first closes. The chart of accounts shows
+  each account's balance, and the header shows sync status. Signing out deletes the
+  database. Replaying 10k entries takes about 0.5 s in Node, and one more entry about
+  0.1 s (0012).
 
 ### Changed
 
