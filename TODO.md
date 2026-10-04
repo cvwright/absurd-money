@@ -3,10 +3,12 @@
 Open issues, grouped by milestone, in priority order. An issue is open if and only if it is
 listed here. See [issues/README.md](issues/README.md) for the workflow.
 
-Next ID: 0033
+Next ID: 0035
 
 ## Milestone 1: Core ledger
 
+- [ ] [0033](issues/0033-key-storage-at-rest.md) Keys wrapped at rest, unlocked by passkey (WebAuthn
+  PRF) or OPAQUE password
 - [ ] 0009 Opening-balances entry
 - [ ] 0010 Manual entry with N splits, validated before posting
 - [ ] 0011 Yearly `journal-YYYY` segments and routing
@@ -44,5 +46,6 @@ Next ID: 0033
 - [ ] 0028 Checkpoint writer and cold start from checkpoints
 - [ ] 0029 OFX/QFX import
 - [ ] 0030 Bank sync as a tool account (SimpleFIN or Plaid). Maybe never.
+- [ ] [0034](issues/0034-non-extractable-keys.md) Non-extractable WebCrypto keys in memory (needs an SDK change)
 - [ ] 0031 Sharing: second user, roles, accountant read-only hand-off
 - [ ] 0032 SDK client constructed from topic keys, for sharing a single year (deferred)
