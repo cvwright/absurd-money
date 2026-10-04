@@ -7,8 +7,6 @@ Next ID: 0035
 
 ## Milestone 1: Core ledger
 
-- [ ] [0033](issues/0033-key-storage-at-rest.md) Keys wrapped at rest, unlocked by passkey (WebAuthn
-  PRF) or OPAQUE password
 - [ ] 0009 Opening-balances entry
 - [ ] 0010 Manual entry with N splits, validated before posting
 - [ ] 0011 Yearly `journal-YYYY` segments and routing
@@ -19,6 +17,8 @@ Next ID: 0035
   receipts
 - [ ] 0016 Period close message and the positional lock rule
 - [ ] 0017 Retry on `ChainConflictError`
+- [ ] [0033](issues/0033-key-storage-at-rest.md) Keys wrapped at rest, unlocked by passkey (WebAuthn
+  PRF) or OPAQUE password
 
 ## Milestone 2: Reconciliation
 
