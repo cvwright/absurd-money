@@ -29,13 +29,14 @@ import { CodecError } from '@/core/errors.js';
 import { foldBudget } from '@/core/fold/budget.js';
 import { balances as foldBalances, type Balances, type BalanceWindow } from '@/core/fold/ledger.js';
 import { foldSegment, type Anomaly, type AnomalyKind, type RawMessage } from '@/core/fold/segment.js';
-import { segmentOf, segmentYear, type AccountId, type EnvelopeId, type IsoDate, type MsgId, type PayeeId } from '@/core/ids.js';
+import { segmentOf, segmentYear, type AccountId, type BlobRef, type EnvelopeId, type IsoDate, type MsgId, type PayeeId } from '@/core/ids.js';
 import { EMPTY_JOURNAL } from '@/core/journal.js';
 import { parseJson } from '@/core/json.js';
 import {
   decodeMessage, decodeState, isStatePath, UnknownTypeError, UnknownVersionError,
   type Split, type StateDocs, type StatePath,
 } from '@/core/messages.js';
+import type { EditTarget } from '@/core/edit.js';
 import { isInverse, type ReversalTarget } from '@/core/reversal.js';
 
 /** The log's schema. Changing it means downloading every topic again. */
@@ -700,6 +701,23 @@ export class Projection {
       segmentOpen: !this.isFrozen(t.topic as string),
       ...(t.reversed_by !== null && { reversedBy: t.reversed_by as MsgId }),
       ...(t.replaced_by !== null && { replacedBy: t.replaced_by as MsgId }),
+    };
+  }
+
+  /**
+   * The entry `id`, with its effective accounts, memo, payee, and receipts, as an edit
+   * needs it. Undefined if the projection holds no valid entry by that ID.
+   */
+  editTarget(id: MsgId): EditTarget | undefined {
+    const base = this.reversalTarget(id);
+    if (!base) return undefined;
+    const t = this.db.selectObject('SELECT topic, payee, memo, receipts FROM txns WHERE id = ?', [id])!;
+    return {
+      ...base,
+      year: segmentYear(t.topic as string)!,
+      ...(t.memo !== null && { memo: t.memo as string }),
+      ...(t.payee !== null && { payee: t.payee as PayeeId }),
+      receipts: t.receipts === null ? [] : (JSON.parse(t.receipts as string) as BlobRef[]),
     };
   }
 

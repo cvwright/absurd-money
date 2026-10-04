@@ -150,6 +150,25 @@ describe('Projection', () => {
     expect(p.halts()).toEqual([{ topic: 'journal-2026', at: future.hash, reason: expect.any(String) }]);
   });
 
+  it('gives an edit target its effective fields', () => {
+    const p = Projection.open(memoryDb());
+    p.append('state', stateWith());
+    const j = chain();
+    const receipt = { blob: `B${'r'.repeat(43)}`, dek: 'k'.repeat(43) };
+    const food = j('food', 'ledger.entry', entry('2026-02-01', [usd(A.checking, -900), usd(A.groceries, 900)], { memo: 'market' }));
+    p.append('journal-2026', [food]);
+    expect(p.editTarget(food.hash as MsgId)).toMatchObject({ year: 2026, memo: 'market', receipts: [], locked: false });
+    expect(p.editTarget(food.hash as MsgId)).not.toHaveProperty('payee');
+
+    p.append('journal-2026', [
+      j('edit', 'ledger.edit', { v: 1, edits: [{ target: food.hash, memo: null, receipts: [receipt], splits: { '1': A.dining } }] }),
+    ]);
+    const t = p.editTarget(food.hash as MsgId)!;
+    expect(t).not.toHaveProperty('memo');
+    expect(t).toMatchObject({ accounts: [A.checking, A.dining], receipts: [receipt] });
+    expect(p.editTarget(msg('nothing'))).toBeUndefined();
+  });
+
   it('records reversals in both registers and links them', () => {
     const p = Projection.open(memoryDb());
     p.append('state', stateWith());

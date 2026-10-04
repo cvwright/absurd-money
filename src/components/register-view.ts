@@ -17,6 +17,7 @@
  * and posts a `ledger.reversal` dated per the routing rule unless the user changes it
  * (0014). "Reverse and re-enter", or "Re-enter" on a reversed entry with no replacement
  * yet, fires `re-enter` for the app to open the entry form as its replacement (0042).
+ * "Edit" opens the edit dialog for an entry's memo, payee, receipts, and categories (0015).
  */
 
 import { LitElement, html, css, nothing } from 'lit';
@@ -29,6 +30,8 @@ import type { ProjectionClient } from '@/projection/client.js';
 import type { RegisterLine } from '@/projection/projection.js';
 import type { LedgerSpace } from '@/services/ledger-space.js';
 import { today } from './dates.js';
+import type { EditDialog } from './edit-dialog.js';
+import './edit-dialog.js';
 import type { ReEnter } from './entry-view.js';
 import { comparePaths, errorMessage, formatAmount, shownAs } from './forms.js';
 
@@ -210,6 +213,10 @@ export class RegisterView extends LitElement {
       color: var(--color-text-secondary);
     }
 
+    .actions {
+      white-space: nowrap;
+    }
+
     .action {
       color: var(--color-text-subdued);
       font-size: var(--font-size-xs);
@@ -336,6 +343,7 @@ export class RegisterView extends LitElement {
   @state() private draftError = '';
   @state() private busy = false;
   @query('dialog') private dialog?: HTMLDialogElement;
+  @query('edit-dialog') private editDialog?: EditDialog;
 
   /** Counts queries, so a slow answer for an account no longer shown is dropped. */
   private generation = 0;
@@ -408,6 +416,7 @@ export class RegisterView extends LitElement {
       ${this.error ? html`<div class="error" role="alert">${this.error}</div>` : nothing}
       ${account ? this.renderLines(chart, account.type, account.cur) : html`<div class="empty">Choose an account to see its register.</div>`}
       ${this.renderDialog(chart)}
+      <edit-dialog .ledger=${this.ledger} .doc=${this.doc} .payees=${this.payees}></edit-dialog>
     `;
   }
 
@@ -456,7 +465,11 @@ export class RegisterView extends LitElement {
         </td>
         <td class="num amount ${amount.amount < 0n ? 'negative' : ''}">${formatAmount(amount)}</td>
         <td class="num ${balance.amount < 0n ? 'negative' : ''}">${formatAmount(balance)}</td>
-        <td>
+        <td class="actions">
+          ${l.kind === 'entry'
+            ? html`<button class="action" type="button" ?disabled=${this.busy}
+                @click=${() => this.startEdit(l)}>Edit</button>`
+            : nothing}
           ${reversible
             ? html`<button class="action" type="button" ?disabled=${this.busy}
                 @click=${() => this.startReversal(l)}>Reverse</button>`
@@ -529,6 +542,17 @@ export class RegisterView extends LitElement {
     const target = await this.projection.call('reversalTarget', id);
     if (!target) throw new Error('That entry is no longer in the local books.');
     return target;
+  }
+
+  private async startEdit(l: RegisterLine) {
+    this.error = '';
+    try {
+      const target = await this.projection.call('editTarget', l.txn);
+      if (!target) throw new Error('That entry is no longer in the local books.');
+      this.editDialog?.open(target);
+    } catch (err) {
+      this.error = errorMessage(err);
+    }
   }
 
   private async startReversal(l: RegisterLine) {

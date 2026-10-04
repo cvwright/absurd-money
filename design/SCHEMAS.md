@@ -292,6 +292,10 @@ A malformed message (a bad shape or type) is rejected whole. An edit that fails 
 semantic rule is ignored on its own, and the rest of the message still applies. The
 client keeps each message under the server's 100 KB limit by splitting large batches.
 
+Post-time: each edit passes the fold-time rules against its target's effective fields;
+the target is not reversed in any segment if the edit moves a split; no split moves to a
+closed account; `payee`, if set, exists in `ledger/payees`; the target's segment is open.
+
 ### `ledger.dismiss`
 
 Marks import rows as handled without posting an entry.

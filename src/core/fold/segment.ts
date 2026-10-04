@@ -7,14 +7,14 @@
  * from the results of this in ledger.ts and lots.ts.
  */
 
-import { isNominal, type Chart } from '../chart.js';
+import type { Chart } from '../chart.js';
 import { CodecError } from '../errors.js';
 import { segmentYear, type AccountId, type BlobRef, type Label, type MsgId, type PayeeId } from '../ids.js';
 import {
   decodeMessage, TOPIC_TYPES, UnknownTypeError, UnknownVersionError,
   type Dismiss, type Edit, type Entry, type LotAdjust, type Reversal,
 } from '../messages.js';
-import { entryProblems, lotAdjustProblems, reversalProblems } from '../validate.js';
+import { editProblem, entryProblems, lotAdjustProblems, reversalProblems } from '../validate.js';
 
 /** A decrypted message, before decoding. `data` is the parsed JSON (see json.ts). */
 export interface RawMessage {
@@ -185,11 +185,19 @@ export function foldSegment(
         const locked = (target: EntryView) =>
           lockIndices.some((h) => target.index <= h && h < index);
         (msg as { edits: readonly Edit[] }).edits.forEach((edit, i) => {
-          const problem = editProblem(edit, entries.get(edit.target), ctx.chart, locked);
+          const t = entries.get(edit.target);
+          const facts = t && {
+            splits: t.entry.splits,
+            accounts: t.accounts,
+            importIds: t.importIds,
+            locked: locked(t),
+            reversed: t.reversedBy.length > 0,
+          };
+          const problem = editProblem(edit, facts, ctx.chart);
           if (problem) {
             anomalies.push({ kind: 'edit-ignored', msg: id, edit: i, detail: problem });
           } else {
-            applyEdit(edit, entries.get(edit.target)!);
+            applyEdit(edit, t!);
           }
         });
         break;
@@ -207,40 +215,6 @@ export function foldSegment(
   }
 
   return { topic, year, entries, reversals, lotAdjusts, dismissals, anomalies, halted };
-}
-
-/** Why one edit is ignored, or `undefined` if it applies. All its fields stand or fall together. */
-function editProblem(
-  edit: Edit,
-  target: EntryView | undefined,
-  chart: Chart,
-  locked: (target: EntryView) => boolean,
-): string | undefined {
-  if (!target) return 'target is not an entry earlier in this segment';
-  const splits = target.entry.splits;
-
-  if (edit.splits) {
-    if (locked(target)) return 'target is locked';
-    if (target.reversedBy.length > 0) return 'target is reversed';
-    for (const [k, account] of Object.entries(edit.splits)) {
-      const i = Number(k);
-      if (i >= splits.length) return `no split ${k}`;
-      const before = chart.get(target.accounts[i]);
-      const after = chart.get(account);
-      if (!isNominal(before) || !isNominal(after)) {
-        return `split ${k}: only income and expense accounts can be recategorized`;
-      }
-      if (after!.cur !== splits[i].cur) return `split ${k}: new account holds ${after!.cur}`;
-    }
-  }
-  if (edit.import_ids) {
-    for (const k of Object.keys(edit.import_ids)) {
-      const i = Number(k);
-      if (i >= splits.length) return `no split ${k}`;
-      if (target.importIds[i] !== undefined) return `split ${k} already has an import_id`;
-    }
-  }
-  return undefined;
 }
 
 function applyEdit(edit: Edit, target: EntryView): void {

@@ -120,6 +120,16 @@ All notable changes to this project are documented here. The format follows
   reversed entry that has no replacement yet, opens the entry form as a copy of the entry
   with its effective accounts and memo, dated like its reversal. It posts with `replaces`,
   and only if the replaced entry is known, reversed, and not already replaced (0042).
+- Editing entries: an "Edit" action on any entry in the register changes its memo, payee,
+  and receipts, and moves its income and expense splits to other open income and expense
+  accounts in the same currency, posted as a `ledger.edit` to the entry's segment with only
+  the fields that changed. Categories are fixed on locked and reversed entries; the rest
+  can still change. Receipts (PDF or images) are encrypted under a fresh key, uploaded as
+  blobs on save, and opened by type sniffed from their bytes, never as HTML or SVG. Each
+  edit is checked against the post-time rules first, which share the fold's per-edit rule
+  and add that the new account is open, the payee exists, and the segment is open.
+  `LedgerSpace.postEdits` packs larger batches into several messages, each under the
+  server's size limit. Choosing a payee needs payees in `ledger/payees` (0036) (0015).
 
 ### Changed
 

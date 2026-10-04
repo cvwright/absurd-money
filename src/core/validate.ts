@@ -7,12 +7,12 @@
  * problems found; empty means valid.
  */
 
-import { sumsToZero } from './amount.js';
+import { sumsToZero, type Commodity } from './amount.js';
 import { envelopeOf } from './budget.js';
-import type { Chart } from './chart.js';
-import { yearOf, type Label, type MsgId } from './ids.js';
+import { isNominal, type Chart } from './chart.js';
+import { yearOf, type AccountId, type Label, type MsgId } from './ids.js';
 import type {
-  Allocation, BudgetDoc, Entry, LotAdjust, PayeesDoc, Reversal, ReversalSplit,
+  Allocation, BudgetDoc, Edit, Entry, LotAdjust, PayeesDoc, Reversal, ReversalSplit,
 } from './messages.js';
 
 function routingProblem(date: string, year: number | undefined): string[] {
@@ -75,6 +75,52 @@ export function lotAdjustProblems(msg: LotAdjust, chart: Chart, year?: number): 
     else if (a.cur !== adj.cur) problems.push(`adjustment ${i}: ${adj.cur} on a ${a.cur} account`);
   });
   return problems;
+}
+
+/** What the fold-time rules for one edit need to know about its target, just before the edit. */
+export interface EditFacts {
+  readonly splits: readonly { readonly cur: Commodity }[];
+  /** Effective account of each split. */
+  readonly accounts: readonly AccountId[];
+  /** Effective `import_id` of each split. */
+  readonly importIds: readonly (Label | undefined)[];
+  /** Some close cites a head at or after the target and before the edit. */
+  readonly locked: boolean;
+  /** The target was reversed before the edit. */
+  readonly reversed: boolean;
+}
+
+/**
+ * Fold-time rules for one edit of a `ledger.edit`: why it is ignored, or `undefined` if it
+ * applies. All its fields stand or fall together. `target` is undefined when the edit
+ * names no entry earlier in its segment.
+ */
+export function editProblem(edit: Edit, target: EditFacts | undefined, chart: Chart): string | undefined {
+  if (!target) return 'target is not an entry earlier in this segment';
+  const splits = target.splits;
+
+  if (edit.splits) {
+    if (target.locked) return 'target is locked';
+    if (target.reversed) return 'target is reversed';
+    for (const [k, account] of Object.entries(edit.splits)) {
+      const i = Number(k);
+      if (i >= splits.length) return `no split ${k}`;
+      const before = chart.get(target.accounts[i]);
+      const after = chart.get(account);
+      if (!isNominal(before) || !isNominal(after)) {
+        return `split ${k}: only income and expense accounts can be recategorized`;
+      }
+      if (after!.cur !== splits[i].cur) return `split ${k}: new account holds ${after!.cur}`;
+    }
+  }
+  if (edit.import_ids) {
+    for (const k of Object.keys(edit.import_ids)) {
+      const i = Number(k);
+      if (i >= splits.length) return `no split ${k}`;
+      if (target.importIds[i] !== undefined) return `split ${k} already has an import_id`;
+    }
+  }
+  return undefined;
 }
 
 /**

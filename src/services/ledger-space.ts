@@ -4,23 +4,24 @@
  * One set of books is one reeeductio space. This wraps the SDK's `Space` with the
  * ledger's operations. For now that is authentication, the chart of accounts
  * (`ledger/accounts`), the budget document (`ledger/budget`), the list of journal years
- * (`ledger/journal`), posting entries and reversals to the journal, reading a journal segment, and
- * fetching and decrypting messages for the sync (sync.ts); the other State documents come
- * in later issues.
+ * (`ledger/journal`), posting entries, reversals, and edits to the journal, receipts as
+ * encrypted blobs, reading a journal segment, and fetching and decrypting messages for the
+ * sync (sync.ts); the other State documents come in later issues.
  */
 
-import { ChainError, NotFoundError, Space, type Message } from 'reeeductio';
+import { ChainError, decodeUrlSafeBase64, NotFoundError, Space, type Message } from 'reeeductio';
 import { budgetUpdateProblems, EMPTY_BUDGET } from '@/core/budget.js';
 import { chainOrder } from '@/core/chain.js';
 import { chartOf, chartUpdateProblems, EMPTY_CHART, type Chart } from '@/core/chart.js';
 import { CodecError } from '@/core/errors.js';
 import type { RawMessage } from '@/core/fold/segment.js';
-import { segmentOf, yearOf, type MsgId } from '@/core/ids.js';
+import { editPostProblems, packEdits, type EditTarget } from '@/core/edit.js';
+import { base64url, isBlobId, segmentOf, yearOf, type BlobRef, type MsgId } from '@/core/ids.js';
 import { EMPTY_JOURNAL, journalUpdateProblems, withYear } from '@/core/journal.js';
 import { parseJsonBytes } from '@/core/json.js';
 import {
-  encodeMessage, isStatePath, TOPIC_TYPES, type AccountsDoc, type BudgetDoc, type Entry,
-  type MessageTypes, type Reversal,
+  encodeMessage, isStatePath, TOPIC_TYPES, type AccountsDoc, type BudgetDoc, type Edit, type Entry,
+  type MessageTypes, type PayeesDoc, type Reversal,
 } from '@/core/messages.js';
 import { reversalPostProblems, type ReversalTarget } from '@/core/reversal.js';
 import { entryPostProblems } from '@/core/validate.js';
@@ -65,7 +66,7 @@ export function budgetSpec(chart: Chart): DocSpec<'ledger/budget'> {
   };
 }
 
-/** An entry or reversal broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
+/** An entry, reversal, or edit broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
 export class InvalidEntryError extends Error {
   constructor(readonly problems: readonly string[]) {
     super(problems.join('; '));
@@ -180,6 +181,47 @@ export class LedgerSpace {
     const problems = reversalPostProblems(reversal, { chart, target, segmentOpen });
     if (problems.length > 0) throw new InvalidEntryError(problems);
     return this.postToSegment(yearOf(reversal.date), 'ledger.reversal', reversal);
+  }
+
+  /**
+   * Posts `edits` as `ledger.edit` messages, each to its target's segment, after checking
+   * every edit against the post-time rules with the latest chart. `targets` holds each
+   * edited entry as the projection holds it (`Projection.editTarget`), and `payees` the
+   * projection's payee list. Nothing is posted unless every edit passes. Returns the new
+   * messages' IDs.
+   *
+   * Edits in one message stand or fall separately, and so do messages: if a post fails,
+   * the ones before it stay posted. A `ChainError` is not retried (0017).
+   */
+  async postEdits(
+    edits: readonly Edit[],
+    targets: ReadonlyMap<MsgId, EditTarget>,
+    payees?: PayeesDoc,
+  ): Promise<MsgId[]> {
+    const chart = chartOf(await this.loadAccounts());
+    const problems = edits.flatMap((e) =>
+      editPostProblems(e, { chart, target: targets.get(e.target), ...(payees && { payees }) }),
+    );
+    if (problems.length > 0) throw new InvalidEntryError(problems);
+    const ids: MsgId[] = [];
+    for (const { year, msg } of packEdits(edits, (t) => targets.get(t)!.year)) {
+      ids.push(await this.postToSegment(year, 'ledger.edit', msg));
+    }
+    return ids;
+  }
+
+  /** Encrypts `bytes` under a fresh key and uploads them, for an entry's `receipts`. */
+  async uploadReceipt(bytes: Uint8Array): Promise<BlobRef> {
+    await this.authenticate();
+    const { blob_id, key } = await this.space.encryptAndUploadBlob(bytes);
+    if (!isBlobId(blob_id)) throw new Error(`the server returned a bad blob ID: ${blob_id}`);
+    return { blob: blob_id, dek: base64url(key) };
+  }
+
+  /** Downloads and decrypts a receipt. */
+  async downloadReceipt(ref: BlobRef): Promise<Uint8Array> {
+    await this.authenticate();
+    return this.space.downloadAndDecryptBlob(ref.blob, decodeUrlSafeBase64(ref.dek));
   }
 
   /**
