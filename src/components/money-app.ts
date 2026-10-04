@@ -3,7 +3,7 @@
  *
  * Root component. Without saved credentials it shows the setup view; with them it
  * connects to the space, opens the local projection and keeps it in sync, and shows the
- * chart of accounts, an account's register, a new entry, or the opening balances. After creating a new space it
+ * chart of accounts, an account's register, a new entry, the opening balances, or the period closes. After creating a new space it
  * shows the recovery key once, since nothing else can bring the books back.
  *
  * Only one tab can have the projection open. Another tab waits, and takes over when
@@ -33,6 +33,7 @@ import './chart-view.js';
 import './register-view.js';
 import './opening-view.js';
 import './entry-view.js';
+import './close-view.js';
 
 setLogLevel(import.meta.env.DEV ? 'debug' : 'warn');
 
@@ -44,13 +45,14 @@ type View =
   | { kind: 'ready' }
   | { kind: 'failed'; error: string };
 
-type Page = 'accounts' | 'register' | 'entry' | 'opening';
+type Page = 'accounts' | 'register' | 'entry' | 'opening' | 'close';
 
 const PAGES: { page: Page; label: string }[] = [
   { page: 'accounts', label: 'Accounts' },
   { page: 'register', label: 'Register' },
   { page: 'entry', label: 'New entry' },
   { page: 'opening', label: 'Opening balances' },
+  { page: 'close', label: 'Close' },
 ];
 
 const STATUS_TEXT: Record<SyncStatus['kind'], string> = {
@@ -281,7 +283,10 @@ export class MoneyApp extends LitElement {
         return html`<entry-view .ledger=${this.ledger!} .projection=${this.live!.projection} .doc=${this.accounts!}
           .reenter=${this.reEnter}></entry-view>`;
       case 'opening':
-        return html`<opening-view .ledger=${this.ledger!} .doc=${this.accounts!}></opening-view>`;
+        return html`<opening-view .ledger=${this.ledger!} .projection=${this.live!.projection}
+          .doc=${this.accounts!}></opening-view>`;
+      case 'close':
+        return html`<close-view .ledger=${this.ledger!} .projection=${this.live!.projection}></close-view>`;
     }
   }
 

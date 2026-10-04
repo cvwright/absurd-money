@@ -16,12 +16,13 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { canonical, isCommodity, minor, type Commodity } from '@/core/amount.js';
 import { accountLabel, accountPath, chartOf, type Chart } from '@/core/chart.js';
 import { ParseError } from '@/core/errors.js';
-import { isIsoDate, newAccountId, type AccountId, type IsoDate, type MsgId } from '@/core/ids.js';
+import { isIsoDate, newAccountId, yearOf, type AccountId, type IsoDate, type MsgId } from '@/core/ids.js';
 import type { Account, AccountsDoc, Entry } from '@/core/messages.js';
 import {
   findOpeningEquity, openingCommodities, openingEntry, openingEquityAccount,
   type OpeningLine, type OpeningLot,
 } from '@/core/opening.js';
+import type { ProjectionClient } from '@/projection/client.js';
 import { InvalidEntryError, type LedgerSpace } from '@/services/ledger-space.js';
 import { today } from './dates.js';
 import { amountOf, comparePaths, errorMessage } from './forms.js';
@@ -247,6 +248,7 @@ export class OpeningView extends LitElement {
   `;
 
   @property({ attribute: false }) ledger!: LedgerSpace;
+  @property({ attribute: false }) projection!: ProjectionClient;
   @property({ attribute: false }) doc!: AccountsDoc;
 
   @state() private date: string = today();
@@ -414,7 +416,8 @@ export class OpeningView extends LitElement {
       if (!confirm(this.summary(preview, chartOf(proposed)))) return;
 
       const doc = missing.length > 0 ? await this.addEquityAccounts(missing) : this.doc;
-      const id = await this.ledger.postEntry(build(date, lines, doc));
+      const segmentOpen = await this.projection.call('segmentOpen', yearOf(date));
+      const id = await this.ledger.postEntry(build(date, lines, doc), segmentOpen);
       this.posted = { id, date };
       this.balances = {};
       this.lots = {};

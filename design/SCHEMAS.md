@@ -534,6 +534,12 @@ Semantics:
   is the checkpoint trust model (an open question in ACCOUNTING.md). A client holding the
   full history recomputes the claim and reports any mismatch.
 
+Post-time, for a period close: no `balances`, `envelopes`, `lots`, or `prices`; every head
+is a journal segment that is listed in `ledger/journal`, is still open, and is no later
+than the year of `period`; and a head with `final` belongs to a close whose `period` is
+that segment's whole year (`YYYY`). The client cites each segment's head as the server
+reports it when posting.
+
 | Type | Fields |
 |---|---|
 | `Balance` | `account`, `amount`, `exp`, `cur` |

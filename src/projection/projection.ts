@@ -43,7 +43,7 @@ import { isInverse, type ReversalTarget } from '@/core/reversal.js';
 export const LOG_VERSION = 1;
 
 /** The fold tables' schema and meaning. Changing it means refolding from the log. */
-export const PROJECTION_VERSION = 2;
+export const PROJECTION_VERSION = 3;
 
 /** The topics the projection replays, besides the `journal-YYYY` segments. */
 export const FIXED_TOPICS = ['state', 'checkpoints', 'budget', 'recon'] as const;
@@ -89,6 +89,18 @@ export interface Halt {
   readonly topic: string;
   readonly at: MsgId;
   readonly reason: string;
+}
+
+/** One segment head cited by a `ledger.checkpoint`. */
+export interface Close {
+  /** The checkpoint message. */
+  readonly msg: MsgId;
+  readonly period: string;
+  readonly topic: string;
+  readonly head: MsgId;
+  readonly final: boolean;
+  /** Whether the head is in the log yet. */
+  readonly held: boolean;
 }
 
 export type TxnKind = 'entry' | 'reversal' | 'lotadjust';
@@ -167,6 +179,9 @@ const FOLD_SCHEMA = `
     body TEXT NOT NULL
   ) STRICT;
   CREATE TABLE heads (
+    pos INTEGER NOT NULL,
+    msg TEXT NOT NULL,
+    period TEXT NOT NULL,
     topic TEXT NOT NULL,
     hash TEXT NOT NULL,
     final INTEGER NOT NULL
@@ -452,7 +467,7 @@ export class Projection {
         if (raw.type !== 'ledger.checkpoint') throw new UnknownTypeError(raw.type);
         if (raw.error !== undefined) throw new CodecError(raw.error);
         const cp = decodeMessage('ledger.checkpoint', raw.data);
-        for (const h of cp.heads) heads.push([h.topic, h.hash, h.final ? 1 : 0]);
+        for (const h of cp.heads) heads.push([heads.length, raw.id, cp.period, h.topic, h.hash, h.final ? 1 : 0]);
       } catch (e) {
         if (e instanceof UnknownTypeError || e instanceof UnknownVersionError) {
           halted = { at: raw.id, error: e };
@@ -465,7 +480,7 @@ export class Projection {
         throw e;
       }
     }
-    this.insertMany('INSERT INTO heads (topic, hash, final) VALUES (?, ?, ?)', heads);
+    this.insertMany('INSERT INTO heads (pos, msg, period, topic, hash, final) VALUES (?, ?, ?, ?, ?, ?)', heads);
     this.recordFold('checkpoints', anomalies, halted);
   }
 
@@ -719,6 +734,37 @@ export class Projection {
       ...(t.payee !== null && { payee: t.payee as PayeeId }),
       receipts: t.receipts === null ? [] : (JSON.parse(t.receipts as string) as BlobRef[]),
     };
+  }
+
+  /**
+   * Every head cited by a checkpoint, in the order they were posted. `held` says whether
+   * the cited message is in this projection's log yet; until it is, it locks nothing here.
+   */
+  closes(): Close[] {
+    return this.db
+      .selectObjects(
+        `SELECT h.msg, h.period, h.topic, h.hash, h.final, l.hash IS NOT NULL AS held FROM heads h
+         LEFT JOIN log l ON l.topic = h.topic AND l.hash = h.hash ORDER BY h.pos`,
+      )
+      .map((r) => ({
+        msg: r.msg as MsgId,
+        period: r.period as string,
+        topic: r.topic as string,
+        head: r.hash as MsgId,
+        final: r.final === 1,
+        held: r.held === 1,
+      }));
+  }
+
+  /**
+   * How many valid entries in the segment of `year` are dated after `date`. A close cites
+   * the segment's head, so these are locked along with the period it names.
+   */
+  entriesAfter(year: number, date: IsoDate): number {
+    return this.db.selectValue(
+      "SELECT count(*) FROM txns WHERE topic = ? AND kind = 'entry' AND date > ?",
+      [segmentOf(year), date],
+    ) as number;
   }
 
   /** Whether the segment of `year` is open: no close has frozen it. */

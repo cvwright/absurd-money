@@ -8,7 +8,7 @@ import { foldSegment, type RawMessage } from '@/core/fold/segment.js';
 import { stringifyJson } from '@/core/json.js';
 import type { MsgId } from '@/core/ids.js';
 import { encodeState } from '@/core/messages.js';
-import { A, accountsDoc, budgetDoc, E, entry, msg, usd } from '@/core/testing.js';
+import { A, accountsDoc, budgetDoc, day, E, entry, msg, usd } from '@/core/testing.js';
 import { Projection, PROJECTION_VERSION, type LogMessage } from './projection.js';
 
 const USD = commodity('USD');
@@ -305,6 +305,32 @@ describe('Projection', () => {
     p.append('journal-2026', [j('edit', 'ledger.edit', { v: 1, edits: [{ target: food.hash, splits: { '1': A.dining } }] })]);
     expect(p.register(A.groceries)).toHaveLength(1);
     expect(p.anomalies()).toMatchObject([{ kind: 'edit-ignored', detail: 'target is locked' }]);
+  });
+
+  it('lists closes, and counts the entries a close locks past its period', () => {
+    const p = Projection.open(memoryDb());
+    p.append('state', stateWith());
+    const j = chain();
+    const feb = j('feb', 'ledger.entry', entry('2026-02-01', [usd(A.checking, -900), usd(A.groceries, 900)]));
+    const apr = j('apr', 'ledger.entry', entry('2026-04-02', [usd(A.checking, -500), usd(A.groceries, 500)]));
+    p.append('journal-2026', [feb, apr]);
+    expect(p.entriesAfter(2026, day('2026-03-31'))).toBe(1);
+    expect(p.entriesAfter(2026, day('2026-01-31'))).toBe(2);
+    expect(p.entriesAfter(2025, day('2025-12-31'))).toBe(0);
+
+    const c = chain(50);
+    const unseen = msg('unseen');
+    p.append('checkpoints', [
+      c('q1', 'ledger.checkpoint', { v: 1, period: '2026-Q1', rounding: 'v1', heads: [{ topic: 'journal-2026', hash: apr.hash }] }),
+      c('y25', 'ledger.checkpoint', { v: 1, period: '2025', rounding: 'v1', heads: [{ topic: 'journal-2025', hash: unseen, final: true }] }),
+    ]);
+    expect(p.closes()).toEqual([
+      { msg: expect.any(String), period: '2026-Q1', topic: 'journal-2026', head: apr.hash, final: false, held: true },
+      { msg: expect.any(String), period: '2025', topic: 'journal-2025', head: unseen, final: true, held: false },
+    ]);
+    // Positional: the April entry was posted before the Q1 close, so it is locked too.
+    expect(p.reversalTarget(apr.hash as MsgId)).toMatchObject({ locked: true });
+    expect(p.segmentOpen(2025)).toBe(false);
   });
 
   it('folds the budget topic against the budget document', () => {

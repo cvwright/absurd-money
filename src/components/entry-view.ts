@@ -20,7 +20,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { canonical, minor, neg, type Decimal } from '@/core/amount.js';
 import { accountLabel, accountPath, chartOf, type Chart } from '@/core/chart.js';
 import { ParseError } from '@/core/errors.js';
-import { isAccountId, isIsoDate, type AccountId, type IsoDate, type MsgId } from '@/core/ids.js';
+import { isAccountId, isIsoDate, yearOf, type AccountId, type IsoDate, type MsgId } from '@/core/ids.js';
 import {
   describeImbalance, imbalances, isPostable, manualEntry, type ManualLine,
 } from '@/core/manual.js';
@@ -522,7 +522,8 @@ export class EntryView extends LitElement {
         replaced = fresh && { ...fresh, reversedBy: fresh.reversedBy ?? replacing.target.reversedBy };
       }
       // postEntry checks the entry again against the latest chart.
-      const id = await this.ledger.postEntry(result.entry, replaced);
+      const segmentOpen = await this.projection.call('segmentOpen', yearOf(date));
+      const id = await this.ledger.postEntry(result.entry, segmentOpen, replaced);
       if (replacing) this.stopReplacing();
       this.posted = { id, date };
       this.memo = '';

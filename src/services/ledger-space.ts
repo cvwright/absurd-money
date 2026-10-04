@@ -4,7 +4,8 @@
  * One set of books is one reeeductio space. This wraps the SDK's `Space` with the
  * ledger's operations. For now that is authentication, the chart of accounts
  * (`ledger/accounts`), the budget document (`ledger/budget`), the list of journal years
- * (`ledger/journal`), the payee list (`ledger/payees`), posting entries, reversals, and edits to the journal, receipts as
+ * (`ledger/journal`), the payee list (`ledger/payees`), posting entries, reversals, and edits to the journal, period
+ * closes to `checkpoints`, receipts as
  * encrypted blobs, reading a journal segment, and fetching and decrypting messages for the
  * sync (sync.ts); the other State documents come in later issues.
  */
@@ -13,6 +14,7 @@ import { ChainError, decodeUrlSafeBase64, NotFoundError, Space, type Message } f
 import { budgetUpdateProblems, EMPTY_BUDGET } from '@/core/budget.js';
 import { chainOrder } from '@/core/chain.js';
 import { chartOf, chartUpdateProblems, EMPTY_CHART, type Chart } from '@/core/chart.js';
+import { closePostProblems, periodClose, periodYear } from '@/core/close.js';
 import { CodecError } from '@/core/errors.js';
 import type { RawMessage } from '@/core/fold/segment.js';
 import { editPostProblems, packEdits, type EditTarget } from '@/core/edit.js';
@@ -73,7 +75,7 @@ export function budgetSpec(chart: Chart): DocSpec<'ledger/budget'> {
   };
 }
 
-/** An entry, reversal, or edit broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
+/** An entry, reversal, edit, or close broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
 export class InvalidEntryError extends Error {
   constructor(readonly problems: readonly string[]) {
     super(problems.join('; '));
@@ -180,20 +182,20 @@ export class LedgerSpace {
 
   /**
    * Posts `entry` to the `journal-YYYY` segment of its date, after checking it against
-   * the post-time rules with the latest chart and payee list. An entry with `replaces` needs `replaced`,
+   * the post-time rules with the latest chart and payee list. `segmentOpen` says whether
+   * that segment is open (`Projection.segmentOpen`). An entry with `replaces` needs `replaced`,
    * the entry it names (`Projection.reversalTarget`). Returns the new message's ID.
    *
    * A `ChainError` means another message landed on the segment first. It is not retried
    * here (0017).
    */
-  async postEntry(entry: Entry, replaced?: ReversalTarget): Promise<MsgId> {
+  async postEntry(entry: Entry, segmentOpen: boolean, replaced?: ReversalTarget): Promise<MsgId> {
     const [chart, payees] = await Promise.all([
       this.loadAccounts().then(chartOf),
       entry.payee ? this.loadPayees() : undefined,
     ]);
-    // No segment can be frozen until the period close exists (0016).
     const problems = entryPostProblems(entry, {
-      chart, segmentOpen: true, ...(payees && { payees }), ...(replaced && { replaced }),
+      chart, segmentOpen, ...(payees && { payees }), ...(replaced && { replaced }),
     });
     if (problems.length > 0) throw new InvalidEntryError(problems);
     return this.postToSegment(yearOf(entry.date), 'ledger.entry', entry);
@@ -238,6 +240,34 @@ export class LedgerSpace {
       ids.push(await this.postToSegment(year, 'ledger.edit', msg));
     }
     return ids;
+  }
+
+  /**
+   * Closes `period` (`YYYY`, `YYYY-MM`, or `YYYY-Qn`): posts a `ledger.checkpoint` to
+   * `checkpoints` citing the current head of its year's segment, which locks everything
+   * posted there so far. With `final`, the close also freezes the segment, so nothing more
+   * can be posted to it. `segmentOpen` says whether it is open now
+   * (`Projection.segmentOpen`). Returns the new message's ID.
+   *
+   * A message posted to the segment between reading its head and posting the close is
+   * left unlocked, and with `final` it is ignored by the fold. A `ChainError` is not
+   * retried (0017).
+   */
+  async postClose(period: string, opts: { final: boolean; segmentOpen: boolean }): Promise<MsgId> {
+    const year = periodYear(period);
+    if (year === undefined) throw new InvalidEntryError([`${period} is not a year, month, or quarter`]);
+    const topic = segmentOf(year);
+    const years = await this.loadJournalYears();
+    await this.authenticate();
+    const head = await topicHead(this.space, topic);
+    if (head === null) throw new InvalidEntryError([`${topic} has nothing to close`]);
+    const close = periodClose(period, head as MsgId, opts.final);
+    const problems = closePostProblems(close, { years, segmentOpen: () => opts.segmentOpen });
+    if (problems.length > 0) throw new InvalidEntryError(problems);
+    const data = new TextEncoder().encode(encodeMessage('ledger.checkpoint', close));
+    const prev = await topicHead(this.space, 'checkpoints');
+    const { message_hash } = await this.space.postEncryptedMessage('checkpoints', 'ledger.checkpoint', data, prev);
+    return message_hash as MsgId;
   }
 
   /** Encrypts `bytes` under a fresh key and uploads them, for an entry's `receipts`. */

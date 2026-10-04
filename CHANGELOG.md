@@ -137,8 +137,20 @@ All notable changes to this project are documented here. The format follows
   entry or edit posts, and nothing is written if it already exists. Posting checks the
   payee against the payee list freshly read from State. Re-entering a reversed entry
   keeps its payee (0036).
+- Period close: a Close page closes a month, quarter, or year by posting a bare
+  `ledger.checkpoint` that cites the current head of that year's segment, locking every
+  entry posted there so far against category changes. A final close of a whole year also
+  freezes the segment. Because the lock is positional, the form says how many entries
+  dated after the period are already posted and will be locked too. The post-time rules
+  (`closePostProblems`) refuse a frozen or unlisted segment, a segment after the period,
+  a budget head, balances, and `final` on anything but a whole-year close. The page lists
+  every close, marking any whose cited head hasn't synced yet. The projection keeps each
+  close's period and message; `PROJECTION_VERSION` is 3 (0016).
 
 ### Changed
+
+- `LedgerSpace.postEntry` takes whether the entry's segment is open, from the projection,
+  so an entry can't be posted to a frozen year (0016).
 
 - `updateDoc` writes nothing when the edit returns the document unchanged (0036).
 - `@noble/hashes` is a direct dependency, and the only non-core import that `src/core`
