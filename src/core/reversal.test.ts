@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { commodity } from './amount.js';
+import { manualEntry } from './manual.js';
 import { encodeMessage, type Split } from './messages.js';
 import { defaultReversalDate, isInverse, reversalOf, reversalPostProblems, type ReversalTarget } from './reversal.js';
 import { A, chart, day, lbl, msg } from './testing.js';
+import { entryPostProblems } from './validate.js';
 
 const USD = commodity('USD');
 const split = (account: Split['account'], amount: bigint, extra: Partial<Split> = {}): Split => ({
@@ -89,5 +91,29 @@ describe('reversalPostProblems', () => {
 
   it('refuses a frozen segment', () => {
     expect(reversalPostProblems(rev, { ...ctx, segmentOpen: false })).toEqual(['journal-2026 is frozen']);
+  });
+});
+
+describe('replacement entries', () => {
+  const lines = [
+    { account: A.checking, amount: { amount: -950n, exp: 2 } },
+    { account: A.dining, amount: { amount: 950n, exp: 2 } },
+  ];
+  const { entry } = manualEntry({ date: day('2026-02-01'), lines, replaces: target.id }, chart);
+  const reversed = { id: target.id, reversedBy: msg('rev') };
+
+  it('carries replaces through manual entry and the codec', () => {
+    expect(entry).toMatchObject({ replaces: target.id });
+    expect(() => encodeMessage('ledger.entry', entry!)).not.toThrow();
+  });
+
+  it('may replace only a known, reversed, unreplaced entry', () => {
+    const ctx = { chart, segmentOpen: true };
+    expect(entryPostProblems(entry!, { ...ctx, replaced: reversed })).toEqual([]);
+    expect(entryPostProblems(entry!, ctx)).toEqual(['the replaced message is not a known entry']);
+    expect(entryPostProblems(entry!, { ...ctx, replaced: { id: target.id } }))
+      .toEqual(['the replaced entry has not been reversed']);
+    expect(entryPostProblems(entry!, { ...ctx, replaced: { ...reversed, replacedBy: msg('fix') } }))
+      .toEqual([`the replaced entry was already replaced by ${msg('fix')}`]);
   });
 });

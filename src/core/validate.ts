@@ -10,7 +10,7 @@
 import { sumsToZero } from './amount.js';
 import { envelopeOf } from './budget.js';
 import type { Chart } from './chart.js';
-import { yearOf, type Label } from './ids.js';
+import { yearOf, type Label, type MsgId } from './ids.js';
 import type {
   Allocation, BudgetDoc, Entry, LotAdjust, PayeesDoc, Reversal, ReversalSplit,
 } from './messages.js';
@@ -95,6 +95,11 @@ export interface EntryPostContext {
   readonly isConsumed?: (label: Label) => boolean;
   /** Whether the segment for this date is open (not frozen). */
   readonly segmentOpen: boolean;
+  /**
+   * For an entry with `replaces`: the entry it names, if the client holds it, with its
+   * first reversal and first replacement.
+   */
+  readonly replaced?: { readonly id: MsgId; readonly reversedBy?: MsgId; readonly replacedBy?: MsgId };
 }
 
 /** Everything checked before posting an entry: the fold-time rules plus post-time ones. */
@@ -108,6 +113,14 @@ export function entryPostProblems(entry: Entry, ctx: EntryPostContext): string[]
   });
   if (entry.payee !== undefined && ctx.payees && !Object.hasOwn(ctx.payees.payees, entry.payee)) {
     problems.push('unknown payee');
+  }
+  if (entry.replaces !== undefined) {
+    const r = ctx.replaced;
+    if (!r || r.id !== entry.replaces) problems.push('the replaced message is not a known entry');
+    else {
+      if (r.reversedBy === undefined) problems.push('the replaced entry has not been reversed');
+      if (r.replacedBy !== undefined) problems.push(`the replaced entry was already replaced by ${r.replacedBy}`);
+    }
   }
   if (!ctx.segmentOpen) problems.push(`journal-${yearOf(entry.date)} is frozen`);
   return problems;

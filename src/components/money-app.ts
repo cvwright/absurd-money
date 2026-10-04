@@ -26,6 +26,7 @@ import {
 } from '@/services/credentials.js';
 import { LedgerSpace } from '@/services/ledger-space.js';
 import { LiveProjection, type StatusEvent, type SyncStatus } from '@/services/live-projection.js';
+import type { ReEnter } from './entry-view.js';
 import type { ConnectDetail, CreateDetail, SetupView } from './setup-view.js';
 import './setup-view.js';
 import './chart-view.js';
@@ -209,6 +210,8 @@ export class MoneyApp extends LitElement {
   @state() private page: Page = 'accounts';
   /** The account the register shows, kept while visiting other pages. */
   @state() private registerAccount: AccountId | null = null;
+  /** A reversed entry the entry page is replacing, until it posts or is cancelled. */
+  @state() private reEnter: ReEnter | null = null;
   @query('setup-view') private setupView?: SetupView;
 
   connectedCallback() {
@@ -253,11 +256,13 @@ export class MoneyApp extends LitElement {
           <nav>
             ${PAGES.map(
               ({ page, label }) => html`<button aria-current=${this.page === page ? 'page' : 'false'}
-                @click=${() => (this.page = page)}>${label}</button>`,
+                @click=${() => this.goTo(page)}>${label}</button>`,
             )}
           </nav>
           <main @accounts-changed=${(e: CustomEvent<AccountsDoc>) => (this.accounts = e.detail)}
-            @account-selected=${this.openRegister}>
+            @account-selected=${this.openRegister}
+            @re-enter=${(e: CustomEvent<ReEnter>) => ((this.reEnter = e.detail), (this.page = 'entry'))}
+            @re-enter-done=${() => (this.reEnter = null)}>
             ${this.renderPage()}
           </main>
         `;
@@ -273,10 +278,17 @@ export class MoneyApp extends LitElement {
         return html`<register-view .projection=${this.live!.projection} .ledger=${this.ledger!} .doc=${this.accounts!}
           .account=${this.registerAccount}></register-view>`;
       case 'entry':
-        return html`<entry-view .ledger=${this.ledger!} .doc=${this.accounts!}></entry-view>`;
+        return html`<entry-view .ledger=${this.ledger!} .projection=${this.live!.projection} .doc=${this.accounts!}
+          .reenter=${this.reEnter}></entry-view>`;
       case 'opening':
         return html`<opening-view .ledger=${this.ledger!} .doc=${this.accounts!}></opening-view>`;
     }
+  }
+
+  /** Leaving a replacement by navigating away abandons it. */
+  private goTo(page: Page) {
+    this.reEnter = null;
+    this.page = page;
   }
 
   private openRegister(e: CustomEvent<AccountId>) {
@@ -378,6 +390,7 @@ export class MoneyApp extends LitElement {
     this.ledger = null;
     this.accounts = null;
     this.registerAccount = null;
+    this.reEnter = null;
     this.view = { kind: 'setup' };
   }
 }

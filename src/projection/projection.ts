@@ -119,6 +119,8 @@ export interface RegisterLine {
   readonly reversedBy?: MsgId;
   /** For an entry: the reversed entry it replaces. */
   readonly replaces?: MsgId;
+  /** For an entry: the first entry that replaces it, in any segment. */
+  readonly replacedBy?: MsgId;
   /**
    * An entry and its first reversal, dated the same day, shown as one line in the
    * reversal's place. `amount` is their net for this account, and `txn` is the entry.
@@ -239,6 +241,9 @@ const approx = (a: { amount: bigint; exp: number }) => Number(a.amount) / 10 ** 
  * date, so one in a later segment is found here and not by the segment fold.
  */
 const REVERSED_BY = `(SELECT r.id FROM txns r WHERE r.reverses = t.id ORDER BY r.topic, r.idx LIMIT 1)`;
+
+/** The first entry that replaces the transaction `t`, in any segment. */
+const REPLACED_BY = `(SELECT r.id FROM txns r WHERE r.replaces = t.id AND r.kind = 'entry' ORDER BY r.topic, r.idx LIMIT 1)`;
 
 type DraftLine = Omit<RegisterLine, 'balance'>;
 
@@ -621,7 +626,7 @@ export class Projection {
   register(account: AccountId, collapse = false): RegisterLine[] {
     const rows = this.db.selectObjects(
       `SELECT t.id, t.kind, t.topic, t.idx, t.date, t.ts, t.payee, t.memo, t.reverses, t.replaces,
-              ${REVERSED_BY} AS reversed_by, p.split, p.amount, p.exp, p.cur
+              ${REVERSED_BY} AS reversed_by, ${REPLACED_BY} AS replaced_by, p.split, p.amount, p.exp, p.cur
        FROM postings p JOIN txns t ON t.id = p.txn
        WHERE p.account = ?
        ORDER BY t.date, t.topic, t.idx, p.split`,
@@ -655,15 +660,9 @@ export class Projection {
       ...(r.reverses !== null && { reverses: r.reverses as MsgId }),
       ...(r.reversed_by !== null && { reversedBy: r.reversed_by as MsgId }),
       ...(r.replaces !== null && { replaces: r.replaces as MsgId }),
+      ...(r.replaced_by !== null && { replacedBy: r.replaced_by as MsgId }),
     }));
-    if (collapse) {
-      const replaced = new Set(this.db.selectValues(
-        `SELECT replaces FROM txns WHERE kind = 'entry'
-         AND replaces IN (SELECT txn FROM postings WHERE account = ?)`,
-        [account],
-      ) as MsgId[]);
-      lines = collapsePairs(lines, replaced);
-    }
+    if (collapse) lines = collapsePairs(lines);
 
     const running = new Map<Commodity, Amount>();
     return lines.map((l) => {
@@ -675,12 +674,12 @@ export class Projection {
   }
 
   /**
-   * The entry `id`, with its effective accounts, as a reversal needs it. Undefined if the
-   * projection holds no valid entry by that ID.
+   * The entry `id`, with its effective accounts, as a reversal or a replacement needs it.
+   * Undefined if the projection holds no valid entry by that ID.
    */
   reversalTarget(id: MsgId): ReversalTarget | undefined {
     const t = this.db.selectObject(
-      `SELECT t.id, t.topic, t.idx, t.date, ${REVERSED_BY} AS reversed_by FROM txns t
+      `SELECT t.id, t.topic, t.idx, t.date, ${REVERSED_BY} AS reversed_by, ${REPLACED_BY} AS replaced_by FROM txns t
        WHERE t.id = ? AND t.kind = 'entry'`,
       [id],
     );
@@ -700,6 +699,7 @@ export class Projection {
       locked,
       segmentOpen: !this.isFrozen(t.topic as string),
       ...(t.reversed_by !== null && { reversedBy: t.reversed_by as MsgId }),
+      ...(t.replaced_by !== null && { replacedBy: t.replaced_by as MsgId }),
     };
   }
 
@@ -801,9 +801,9 @@ function touchedBy(messages: readonly LogMessage[]): Set<string> {
 
 /**
  * Folds each entry and its first reversal, dated the same day, into one line in the
- * reversal's place (see `register`). `replaced` holds the entries a replacement names.
+ * reversal's place (see `register`).
  */
-function collapsePairs(lines: readonly DraftLine[], replaced: ReadonlySet<MsgId>): DraftLine[] {
+function collapsePairs(lines: readonly DraftLine[]): DraftLine[] {
   const byTxn = new Map<MsgId, DraftLine[]>();
   for (const l of lines) {
     const list = byTxn.get(l.txn);
@@ -831,7 +831,7 @@ function collapsePairs(lines: readonly DraftLine[], replaced: ReadonlySet<MsgId>
     if (l !== rev[0]) continue;
     const entry = byTxn.get(target)!;
     const amount = [...entry, ...rev].map((x) => x.amount).reduce((a, b) => add(a, b));
-    if (amount.amount === 0n && replaced.has(target)) continue;
+    if (amount.amount === 0n && entry[0].replacedBy !== undefined) continue;
     out.push({ ...entry[0], amount, collapsed: true });
   }
   return out;

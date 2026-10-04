@@ -15,7 +15,8 @@
  * reversals" lists every line as posted instead. Any entry not yet reversed can be
  * reversed from here: the dialog shows the inverse splits, with the effective accounts,
  * and posts a `ledger.reversal` dated per the routing rule unless the user changes it
- * (0014).
+ * (0014). "Reverse and re-enter", or "Re-enter" on a reversed entry with no replacement
+ * yet, fires `re-enter` for the app to open the entry form as its replacement (0042).
  */
 
 import { LitElement, html, css, nothing } from 'lit';
@@ -28,6 +29,7 @@ import type { ProjectionClient } from '@/projection/client.js';
 import type { RegisterLine } from '@/projection/projection.js';
 import type { LedgerSpace } from '@/services/ledger-space.js';
 import { today } from './dates.js';
+import type { ReEnter } from './entry-view.js';
 import { comparePaths, errorMessage, formatAmount, shownAs } from './forms.js';
 
 const TYPE_LABELS: Record<AccountType, string> = {
@@ -61,6 +63,8 @@ interface Draft {
   target: ReversalTarget;
   date: string;
   memo: string;
+  /** The entry's own memo, for re-entering it. */
+  entryMemo?: string;
 }
 
 /** A payee's name, following one merge. */
@@ -439,6 +443,7 @@ export class RegisterView extends LitElement {
     const others = l.others.map((id) => accountLabel(chart, id) || id);
     const rowClass = l.collapsed ? 'collapsed' : l.reversedBy ? 'reversed' : '';
     const reversible = l.kind === 'entry' && !l.reversedBy;
+    const reenterable = l.kind === 'entry' && l.reversedBy && !l.replacedBy;
     return html`
       <tr class=${rowClass} title=${l.collapsed ? 'Reversed the same day; the amount is the net' : ''}>
         <td class="date">${l.date}</td>
@@ -454,8 +459,11 @@ export class RegisterView extends LitElement {
         <td>
           ${reversible
             ? html`<button class="action" type="button" ?disabled=${this.busy}
-                @click=${() => this.startReversal(l.txn)}>Reverse</button>`
-            : nothing}
+                @click=${() => this.startReversal(l)}>Reverse</button>`
+            : reenterable
+              ? html`<button class="action" type="button" ?disabled=${this.busy}
+                  @click=${() => this.reenter(l)}>Re-enter</button>`
+              : nothing}
         </td>
       </tr>
     `;
@@ -503,7 +511,10 @@ export class RegisterView extends LitElement {
               </table>
               <div class="buttons">
                 <button type="button" @click=${() => this.dialog?.close()}>Cancel</button>
-                <button class="primary" type="button" ?disabled=${this.busy} @click=${this.postReversal}>
+                <button type="button" ?disabled=${this.busy} @click=${() => this.postReversal(true)}>
+                  Reverse and re-enter
+                </button>
+                <button class="primary" type="button" ?disabled=${this.busy} @click=${() => this.postReversal(false)}>
                   Post reversal
                 </button>
               </div>
@@ -513,20 +524,41 @@ export class RegisterView extends LitElement {
     `;
   }
 
-  private async startReversal(id: MsgId) {
+  /** The entry `id` as the projection holds it now. */
+  private async target(id: MsgId): Promise<ReversalTarget> {
+    const target = await this.projection.call('reversalTarget', id);
+    if (!target) throw new Error('That entry is no longer in the local books.');
+    return target;
+  }
+
+  private async startReversal(l: RegisterLine) {
     this.error = '';
     try {
-      const target = await this.projection.call('reversalTarget', id);
-      if (!target) throw new Error('That entry is no longer in the local books.');
+      const target = await this.target(l.txn);
       if (target.reversedBy) throw new Error('That entry has already been reversed.');
       this.draftError = '';
-      this.draft = { target, date: defaultReversalDate(target, today()), memo: '' };
+      this.draft = { target, date: defaultReversalDate(target, today()), memo: '', entryMemo: l.memo };
     } catch (err) {
       this.error = errorMessage(err);
     }
   }
 
-  private async postReversal() {
+  private async reenter(l: RegisterLine) {
+    this.error = '';
+    try {
+      const target = await this.target(l.txn);
+      if (target.replacedBy) throw new Error('That entry has already been replaced.');
+      this.fireReEnter({ target, ...(l.memo !== undefined && { memo: l.memo }) });
+    } catch (err) {
+      this.error = errorMessage(err);
+    }
+  }
+
+  private fireReEnter(detail: ReEnter) {
+    this.dispatchEvent(new CustomEvent<ReEnter>('re-enter', { detail, bubbles: true }));
+  }
+
+  private async postReversal(thenReEnter: boolean) {
     const d = this.draft;
     if (!d) return;
     if (!isIsoDate(d.date)) {
@@ -538,8 +570,11 @@ export class RegisterView extends LitElement {
     try {
       const reversal = reversalOf(d.target, { date: d.date, memo: d.memo });
       const segmentOpen = await this.projection.call('segmentOpen', yearOf(d.date));
-      await this.ledger.postReversal(reversal, d.target, segmentOpen);
+      const id = await this.ledger.postReversal(reversal, d.target, segmentOpen);
       this.dialog?.close();
+      if (thenReEnter) {
+        this.fireReEnter({ target: { ...d.target, reversedBy: id }, ...(d.entryMemo !== undefined && { memo: d.entryMemo }) });
+      }
     } catch (err) {
       this.draftError = errorMessage(err);
     } finally {

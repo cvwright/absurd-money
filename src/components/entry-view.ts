@@ -7,6 +7,10 @@
  * type, and the entry is checked against the post-time rules before it posts.
  *
  * Lots and payees are left to later issues (0027, 0036).
+ *
+ * Given `reenter`, the form is a replacement for a reversed entry (0042): it starts as a
+ * copy of that entry, with its effective accounts, and posts with `replaces`, so the
+ * register shows it as the corrected line. Posting or cancelling fires `re-enter-done`.
  */
 
 import { LitElement, html, css, nothing } from 'lit';
@@ -19,9 +23,19 @@ import {
   describeImbalance, imbalances, isPostable, manualEntry, type ManualLine,
 } from '@/core/manual.js';
 import { ACCOUNT_TYPES, type AccountsDoc, type AccountType, type Entry } from '@/core/messages.js';
+import { defaultReversalDate, type ReversalTarget } from '@/core/reversal.js';
+import type { ProjectionClient } from '@/projection/client.js';
 import { InvalidEntryError, type LedgerSpace } from '@/services/ledger-space.js';
 import { today } from './dates.js';
-import { amountOf, comparePaths, errorMessage } from './forms.js';
+import { amountOf, comparePaths, errorMessage, formatAmount } from './forms.js';
+
+/** A reversed entry to re-enter, as `re-enter` events carry it. */
+export interface ReEnter {
+  /** `reversedBy` is set, though the projection may not have the reversal yet. */
+  readonly target: ReversalTarget;
+  /** The entry's effective memo. */
+  readonly memo?: string;
+}
 
 const TYPE_LABELS: Record<AccountType, string> = {
   asset: 'Assets',
@@ -277,7 +291,9 @@ export class EntryView extends LitElement {
   `;
 
   @property({ attribute: false }) ledger!: LedgerSpace;
+  @property({ attribute: false }) projection!: ProjectionClient;
   @property({ attribute: false }) doc!: AccountsDoc;
+  @property({ attribute: false }) reenter: ReEnter | null = null;
 
   @state() private date: string = today();
   @state() private memo = '';
@@ -285,6 +301,33 @@ export class EntryView extends LitElement {
   @state() private busy = false;
   @state() private error = '';
   @state() private posted: { id: MsgId; date: IsoDate } | null = null;
+  /** The reversed entry this one will replace. */
+  @state() private replacing: ReEnter | null = null;
+
+  willUpdate(changed: Map<PropertyKey, unknown>) {
+    if (changed.has('reenter')) this.startReplacing(this.reenter);
+  }
+
+  private startReplacing(r: ReEnter | null) {
+    this.replacing = r;
+    if (!r) return;
+    const { target } = r;
+    this.posted = null;
+    this.error = '';
+    this.date = defaultReversalDate(target, today());
+    this.memo = r.memo ?? '';
+    this.lines = target.splits.map((s, i) => {
+      const text = formatAmount(s.amount < 0n ? { ...s, amount: -s.amount } : s);
+      return { account: target.accounts[i], debit: s.amount > 0n ? text : '', credit: s.amount < 0n ? text : '' };
+    });
+  }
+
+  private stopReplacing() {
+    this.replacing = null;
+    this.memo = '';
+    this.lines = [emptyLine(), emptyLine()];
+    this.dispatchEvent(new CustomEvent('re-enter-done', { bubbles: true }));
+  }
 
   render() {
     const chart = chartOf(this.doc);
@@ -293,7 +336,14 @@ export class EntryView extends LitElement {
     const off = imbalances(parsed, chart);
 
     return html`
-      <h2>New entry</h2>
+      <h2>${this.replacing ? 'Replacement entry' : 'New entry'}</h2>
+      ${this.replacing
+        ? html`<p class="intro">
+            Replaces the entry of ${this.replacing.target.date}, which has been reversed. Change
+            what was wrong and post; the register shows this as the corrected entry.
+            <button class="link" type="button" @click=${this.stopReplacing}>Cancel</button>
+          </p>`
+        : nothing}
       <p class="intro">
         Debits increase assets and expenses; credits increase liabilities, income, and
         equity. Debits and credits must be equal in each commodity. Leave one line's amount
@@ -341,7 +391,9 @@ export class EntryView extends LitElement {
                   )}</span>`}
             </div>
 
-            <button class="primary" type="button" ?disabled=${this.busy} @click=${this.post}>Post entry</button>
+            <button class="primary" type="button" ?disabled=${this.busy} @click=${this.post}>
+              ${this.replacing ? 'Post replacement' : 'Post entry'}
+            </button>
           `}
     `;
   }
@@ -407,12 +459,21 @@ export class EntryView extends LitElement {
     try {
       const chart = chartOf(this.doc);
       const lines = this.lines.flatMap((l, i) => lineOf(l, i, chart) ?? []);
-      const result = manualEntry({ date, lines, memo: this.memo }, chart);
+      const replacing = this.replacing;
+      const result = manualEntry({ date, lines, memo: this.memo, replaces: replacing?.target.id }, chart);
       if (result.problems) throw new InvalidEntryError(result.problems);
       if (!confirm(this.summary(result.entry, chart))) return;
 
+      let replaced: ReversalTarget | undefined;
+      if (replacing) {
+        // Fresh, to see a replacement posted elsewhere. A reversal posted a moment ago may
+        // not have synced yet, so the one we were handed still counts.
+        const fresh = await this.projection.call('reversalTarget', replacing.target.id);
+        replaced = fresh && { ...fresh, reversedBy: fresh.reversedBy ?? replacing.target.reversedBy };
+      }
       // postEntry checks the entry again against the latest chart.
-      const id = await this.ledger.postEntry(result.entry);
+      const id = await this.ledger.postEntry(result.entry, replaced);
+      if (replacing) this.stopReplacing();
       this.posted = { id, date };
       this.memo = '';
       this.lines = [emptyLine(), emptyLine()];
@@ -429,7 +490,8 @@ export class EntryView extends LitElement {
       return `${accountLabel(chart, s.account)}: ${side} ${canonical(s.amount > 0n ? s : neg(s))} ${s.cur}`;
     });
     const memo = entry.memo ? ` "${entry.memo}"` : '';
-    return `Post this entry${memo} dated ${entry.date}? Entries are permanent.\n\n${lines.join('\n')}`;
+    const what = entry.replaces ? 'replacement entry' : 'entry';
+    return `Post this ${what}${memo} dated ${entry.date}? Entries are permanent.\n\n${lines.join('\n')}`;
   }
 }
 

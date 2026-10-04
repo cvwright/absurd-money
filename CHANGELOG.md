@@ -116,6 +116,10 @@ All notable changes to this project are documented here. The format follows
   lists every line as posted. The projection now links reversals to their targets across
   segments and reports `reversed-twice` and `reversal-mismatch` anomalies across them too
   (0014).
+- Reverse and re-enter: the reverse dialog's "Reverse and re-enter", or "Re-enter" on a
+  reversed entry that has no replacement yet, opens the entry form as a copy of the entry
+  with its effective accounts and memo, dated like its reversal. It posts with `replaces`,
+  and only if the replaced entry is known, reversed, and not already replaced (0042).
 
 ### Changed
 

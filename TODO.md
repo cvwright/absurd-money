@@ -10,8 +10,6 @@ Next ID: 0043
 - [ ] 0039 Measure cold start against a seeded 10k-entry space, on desktop and on a phone
 - [ ] 0035 Warn before posting opening balances for an account that already has them
   (needs the projection)
-- [ ] 0042 Reverse and re-enter: an entry form prefilled from the reversed entry, posted
-  with `replaces`
 - [ ] 0015 `ledger.edit`: recategorization (income/expense accounts only), memo, payee,
   receipts
 - [ ] 0036 Payees: choose or add a payee on manual entry, stored in `ledger/payees`

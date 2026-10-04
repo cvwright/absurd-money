@@ -152,15 +152,16 @@ export class LedgerSpace {
 
   /**
    * Posts `entry` to the `journal-YYYY` segment of its date, after checking it against
-   * the post-time rules with the latest chart. Returns the new message's ID.
+   * the post-time rules with the latest chart. An entry with `replaces` needs `replaced`,
+   * the entry it names (`Projection.reversalTarget`). Returns the new message's ID.
    *
    * A `ChainError` means another message landed on the segment first. It is not retried
    * here (0017).
    */
-  async postEntry(entry: Entry): Promise<MsgId> {
+  async postEntry(entry: Entry, replaced?: ReversalTarget): Promise<MsgId> {
     const chart = chartOf(await this.loadAccounts());
     // No segment can be frozen until the period close exists (0016).
-    const problems = entryPostProblems(entry, { chart, segmentOpen: true });
+    const problems = entryPostProblems(entry, { chart, segmentOpen: true, ...(replaced && { replaced }) });
     if (problems.length > 0) throw new InvalidEntryError(problems);
     return this.postToSegment(yearOf(entry.date), 'ledger.entry', entry);
   }

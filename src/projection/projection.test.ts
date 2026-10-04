@@ -214,6 +214,8 @@ describe('Projection', () => {
     p.append('journal-2026', [fixed]);
     expect(p.register(A.checking, true).map((l) => l.txn)).toEqual([pay.hash, coffee.hash, fixed.hash]);
     expect(p.register(A.checking, true).at(-1)).toMatchObject({ replaces: food.hash, balance: { amount: 3750n } });
+    expect(p.register(A.checking).find((l) => l.txn === food.hash)).toMatchObject({ replacedBy: fixed.hash });
+    expect(p.reversalTarget(food.hash as MsgId)).toMatchObject({ reversedBy: rev.hash, replacedBy: fixed.hash });
   });
 
   it('finds a reversal target with its effective accounts, lock, and freeze', () => {

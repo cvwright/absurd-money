@@ -181,7 +181,8 @@ entry or any balance, because the lot's creating entry may sit in a segment the 
 doesn't hold.
 
 Post-time: no split posts to a closed account; `payee` exists in `ledger/payees`;
-no `import_id` is already consumed; the date's segment is open.
+no `import_id` is already consumed; the date's segment is open; `replaces`, if set, names
+an entry that has been reversed and that no other entry already replaces.
 
 ### `ledger.reversal`
 

@@ -27,12 +27,15 @@ export interface ReversalTarget {
   readonly segmentOpen: boolean;
   /** The first reversal of the entry in any segment, if it has been reversed. */
   readonly reversedBy?: MsgId;
+  /** The first entry in any segment that `replaces` this one, if there is one. */
+  readonly replacedBy?: MsgId;
 }
 
 /**
- * The date a reversal defaults to: the target's own, so the pair lands in the same segment
- * and period and the register nets it to nothing, unless the target is locked or its
- * segment is frozen. Then `today`, like an accountant's reversing entry in the open period.
+ * The date a reversal, or the replacement that follows it, defaults to: the target's own,
+ * so the pair lands in the same segment and period and the register nets it to nothing,
+ * unless the target is locked or its segment is frozen. Then `today`, like an
+ * accountant's reversing entry in the open period.
  */
 export function defaultReversalDate(target: ReversalTarget, today: IsoDate): IsoDate {
   return !target.locked && target.segmentOpen ? target.date : today;

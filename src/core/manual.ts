@@ -11,7 +11,7 @@
 
 import { canonical, neg, sumByCommodity, type Amount, type Commodity, type Decimal } from './amount.js';
 import { accountLabel, type Chart } from './chart.js';
-import type { AccountId, IsoDate } from './ids.js';
+import type { AccountId, IsoDate, MsgId } from './ids.js';
 import type { Account, Entry, Split } from './messages.js';
 import { entryProblems } from './validate.js';
 
@@ -25,6 +25,8 @@ export interface ManualInput {
   readonly date: IsoDate;
   readonly lines: readonly ManualLine[];
   readonly memo?: string;
+  /** The reversed entry this one replaces (0042). */
+  readonly replaces?: MsgId;
 }
 
 export type ManualResult =
@@ -90,7 +92,13 @@ export function manualEntry(input: ManualInput, chart: Chart): ManualResult {
     return { account: l.account, amount: amount.amount, exp: amount.exp, cur };
   });
 
-  const entry: Entry = { v: 1, date: input.date, splits, ...(input.memo?.trim() ? { memo: input.memo.trim() } : {}) };
+  const entry: Entry = {
+    v: 1,
+    date: input.date,
+    splits,
+    ...(input.memo?.trim() ? { memo: input.memo.trim() } : {}),
+    ...(input.replaces ? { replaces: input.replaces } : {}),
+  };
   // The construction above should already guarantee these; check anyway.
   const invalid = entryProblems(entry, chart);
   return invalid.length > 0 ? { problems: invalid } : { entry };
