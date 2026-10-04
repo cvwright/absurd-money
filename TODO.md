@@ -3,15 +3,16 @@
 Open issues, grouped by milestone, in priority order. An issue is open if and only if it is
 listed here. See [issues/README.md](issues/README.md) for the workflow.
 
-Next ID: 0035
+Next ID: 0036
 
 ## Milestone 1: Core ledger
 
-- [ ] 0009 Opening-balances entry
 - [ ] 0010 Manual entry with N splits, validated before posting
 - [ ] 0011 Yearly `journal-YYYY` segments and routing
 - [ ] [0012](issues/0012-projection.md) Replay into a SQLite-WASM/OPFS projection, with live updates over WebSocket
 - [ ] 0013 Per-account register, sorted by entry date
+- [ ] 0035 Warn before posting opening balances for an account that already has them
+  (needs the projection)
 - [ ] 0014 Reversals
 - [ ] 0015 `ledger.edit`: recategorization (income/expense accounts only), memo, payee,
   receipts

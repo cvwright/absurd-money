@@ -2,8 +2,9 @@
  * Money App - Main Application Shell
  *
  * Root component. Without saved credentials it shows the setup view; with them it
- * connects to the space and shows the chart of accounts. After creating a new space it
- * shows the recovery key once, since nothing else can bring the books back.
+ * connects to the space and shows the chart of accounts or the opening balances. After
+ * creating a new space it shows the recovery key once, since nothing else can bring the
+ * books back.
  */
 
 import { LitElement, html, css } from 'lit';
@@ -23,6 +24,7 @@ import { LedgerSpace } from '@/services/ledger-space.js';
 import type { ConnectDetail, CreateDetail, SetupView } from './setup-view.js';
 import './setup-view.js';
 import './chart-view.js';
+import './opening-view.js';
 
 setLogLevel(import.meta.env.DEV ? 'debug' : 'warn');
 
@@ -32,6 +34,13 @@ type View =
   | { kind: 'backup'; key: string }
   | { kind: 'ready' }
   | { kind: 'failed'; error: string };
+
+type Page = 'accounts' | 'opening';
+
+const PAGES: { page: Page; label: string }[] = [
+  { page: 'accounts', label: 'Accounts' },
+  { page: 'opening', label: 'Opening balances' },
+];
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -87,6 +96,26 @@ export class MoneyApp extends LitElement {
       color: var(--color-text-secondary);
       font-size: var(--font-size-sm);
       flex-shrink: 0;
+    }
+
+    nav {
+      display: flex;
+      gap: var(--spacing-xs);
+      max-width: 760px;
+      margin: 0 auto;
+      padding: var(--spacing-sm) var(--spacing-md) 0;
+    }
+
+    nav button {
+      padding: var(--spacing-xs) var(--spacing-md);
+      border-radius: var(--radius-full);
+      color: var(--color-text-secondary);
+      font-size: var(--font-size-sm);
+    }
+
+    nav button[aria-current='page'] {
+      background-color: var(--color-bg-highlight);
+      color: var(--color-text-primary);
     }
 
     main {
@@ -148,6 +177,7 @@ export class MoneyApp extends LitElement {
   @state() private view: View = { kind: 'loading' };
   @state() private ledger: LedgerSpace | null = null;
   @state() private accounts: AccountsDoc | null = null;
+  @state() private page: Page = 'accounts';
   @query('setup-view') private setupView?: SetupView;
 
   connectedCallback() {
@@ -180,8 +210,16 @@ export class MoneyApp extends LitElement {
             <span class="space" title=${this.ledger!.spaceId}>${this.ledger!.spaceId}</span>
             <button @click=${this.signOut}>Sign out</button>
           </header>
-          <main>
-            <chart-view .ledger=${this.ledger!} .doc=${this.accounts!}></chart-view>
+          <nav>
+            ${PAGES.map(
+              ({ page, label }) => html`<button aria-current=${this.page === page ? 'page' : 'false'}
+                @click=${() => (this.page = page)}>${label}</button>`,
+            )}
+          </nav>
+          <main @accounts-changed=${(e: CustomEvent<AccountsDoc>) => (this.accounts = e.detail)}>
+            ${this.page === 'accounts'
+              ? html`<chart-view .ledger=${this.ledger!} .doc=${this.accounts!}></chart-view>`
+              : html`<opening-view .ledger=${this.ledger!} .doc=${this.accounts!}></opening-view>`}
           </main>
         `;
     }

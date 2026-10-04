@@ -3,17 +3,19 @@
  *
  * The chart of accounts: list by type and parent, add an account, rename, close, and
  * reopen. Every change rewrites the whole `ledger/accounts` document through
- * `LedgerSpace.updateAccounts`, which enforces the post-time rules. Envelope and budget
- * flags are left to the budgeting issues (0024).
+ * `LedgerSpace.updateAccounts`, which enforces the post-time rules, and fires
+ * `accounts-changed` with the document written. Envelope and budget flags are left to the
+ * budgeting issues (0024).
  */
 
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { isCommodity } from '@/core/amount.js';
-import { newAccountId, type AccountId, type IsoDate } from '@/core/ids.js';
+import { newAccountId, type AccountId } from '@/core/ids.js';
 import { ACCOUNT_TYPES, type Account, type AccountsDoc, type AccountType } from '@/core/messages.js';
 import type { LedgerSpace } from '@/services/ledger-space.js';
 import { InvalidDocError } from '@/services/state-store.js';
+import { today } from './dates.js';
 
 const TYPE_LABELS: Record<AccountType, string> = {
   asset: 'Assets',
@@ -43,12 +45,6 @@ function rowsOf(doc: AccountsDoc, type: AccountType, showClosed: boolean): Row[]
   };
   walk(null, 0);
   return rows;
-}
-
-function today(): IsoDate {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` as IsoDate;
 }
 
 function message(err: unknown): string {
@@ -338,6 +334,7 @@ export class ChartView extends LitElement {
     this.error = '';
     try {
       this.doc = await this.ledger.updateAccounts(edit);
+      this.dispatchEvent(new CustomEvent<AccountsDoc>('accounts-changed', { detail: this.doc, bubbles: true }));
       return true;
     } catch (err) {
       this.error = message(err);

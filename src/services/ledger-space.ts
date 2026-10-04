@@ -2,13 +2,16 @@
  * Ledger Space Service
  *
  * One set of books is one reeeductio space. This wraps the SDK's `Space` with the
- * ledger's operations. For now that is authentication and the chart of accounts
- * (`ledger/accounts`); the journal and the other State documents come in later issues.
+ * ledger's operations. For now that is authentication, the chart of accounts
+ * (`ledger/accounts`), and posting entries to the journal; reading the journal and the
+ * other State documents come in later issues.
  */
 
 import { ChainError, NotFoundError, Space } from 'reeeductio';
-import { chartUpdateProblems, EMPTY_CHART } from '@/core/chart.js';
-import type { AccountsDoc } from '@/core/messages.js';
+import { chartOf, chartUpdateProblems, EMPTY_CHART } from '@/core/chart.js';
+import { segmentFor, type MsgId } from '@/core/ids.js';
+import { encodeMessage, type AccountsDoc, type Entry } from '@/core/messages.js';
+import { entryPostProblems } from '@/core/validate.js';
 import type { SpaceCredentials } from './credentials.js';
 import {
   loadDoc,
@@ -23,6 +26,14 @@ export const ACCOUNTS: DocSpec<'ledger/accounts'> = {
   empty: EMPTY_CHART,
   problems: chartUpdateProblems,
 };
+
+/** An entry broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
+export class InvalidEntryError extends Error {
+  constructor(readonly problems: readonly string[]) {
+    super(problems.join('; '));
+    this.name = 'InvalidEntryError';
+  }
+}
 
 export class LedgerSpace {
   readonly space: Space;
@@ -75,6 +86,40 @@ export class LedgerSpace {
   updateAccounts(edit: (doc: AccountsDoc) => AccountsDoc): Promise<AccountsDoc> {
     return updateDoc(this.state, ACCOUNTS, edit);
   }
+
+  /**
+   * Posts `entry` to the `journal-YYYY` segment of its date, after checking it against
+   * the post-time rules with the latest chart. Returns the new message's ID.
+   *
+   * A `ChainError` means another message landed on the segment first. It is not retried
+   * here (0017).
+   */
+  async postEntry(entry: Entry): Promise<MsgId> {
+    const chart = chartOf(await this.loadAccounts());
+    // No segment can be frozen until the period close exists (0016).
+    const problems = entryPostProblems(entry, { chart, segmentOpen: true });
+    if (problems.length > 0) throw new InvalidEntryError(problems);
+    const topic = segmentFor(entry.date);
+    const data = new TextEncoder().encode(encodeMessage('ledger.entry', entry));
+    await this.authenticate();
+    const prev = await topicHead(this.space, topic);
+    const { message_hash } = await this.space.postEncryptedMessage(topic, 'ledger.entry', data, prev);
+    return message_hash as MsgId;
+  }
+}
+
+/**
+ * The newest message hash on `topic`, or null if it is empty. `from` is unbounded rather
+ * than `Date.now()`, so a client clock behind the server's can't hide the newest message
+ * and pin us to a stale head.
+ */
+async function topicHead(space: Space, topic: string): Promise<string | null> {
+  const { messages } = await space.getMessages(
+    topic,
+    { from: Number.MAX_SAFE_INTEGER, to: 0, limit: 1 },
+    { useCache: false },
+  );
+  return messages[0]?.message_hash ?? null;
 }
 
 /** State through the SDK, encrypted under the space's state key. */
@@ -82,14 +127,7 @@ function sdkStateBackend(space: Space, ready: () => Promise<void>): StateBackend
   return {
     async head() {
       await ready();
-      // Newest first. `from` is unbounded rather than `Date.now()`, so a client clock
-      // behind the server's can't hide the newest message and pin us to a stale head.
-      const { messages } = await space.getMessages(
-        'state',
-        { from: Number.MAX_SAFE_INTEGER, to: 0, limit: 1 },
-        { useCache: false },
-      );
-      return messages[0]?.message_hash ?? null;
+      return topicHead(space, 'state');
     },
 
     async read(path) {

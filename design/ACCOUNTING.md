@@ -610,6 +610,13 @@ exists without a hard boundary:
 lots carrying their real acquisition dates and basis. Without it the first register is
 wrong. It is the same shape yearly books would need every year, posted once.
 
+Since an account holds one commodity, there is one Opening Balances equity account per
+commodity, and each commodity balances against its own. An opening lot of 100 VTI is
+`+100 VTI` (with `cost` and `acquired`) against `−100 VTI` in the VTI opening account; its
+basis rides on the lot, not on a USD split. Only asset and liability accounts are
+opened: income and expense start from zero by definition, and envelopes are funded by
+allocations (0009).
+
 ### Physical segments, aligned to dates
 
 The ledger is logically one, but the journal is **physically split into one topic per

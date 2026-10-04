@@ -63,6 +63,14 @@ All notable changes to this project are documented here. The format follows
   so an edit that loses a race is re-applied to the winner's chart rather than
   overwriting it. A first UI lists accounts by type and parent, and adds, renames,
   closes, and reopens them (0008).
+- The opening-balances entry. A new Opening balances page takes each open asset and
+  liability account's balance on the opening date (what a liability owes, as a positive
+  number), or an investment account's lots with their real acquisition dates and total
+  cost. It posts them as one `ledger.entry` to that date's `journal-YYYY` segment, against
+  an equity account named "Opening Balances" in each commodity, added to the chart first if
+  missing. Accounts are listed by their full path ("Vanguard › VTI"), so positions with
+  the same name in different brokerages can be told apart. `LedgerSpace.postEntry` checks
+  any entry against the post-time rules before posting it (0009).
 
 ### Changed
 

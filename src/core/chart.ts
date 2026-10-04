@@ -74,6 +74,27 @@ export function chartUpdateProblems(prev: AccountsDoc, next: AccountsDoc): strin
   return problems;
 }
 
+/**
+ * The names from the top-level ancestor down to the account, so accounts with the same
+ * name under different parents can be told apart. Empty for an unknown account. A parent
+ * cycle (which `chartProblems` rejects) stops the walk rather than looping.
+ */
+export function accountPath(chart: Chart, id: AccountId): string[] {
+  const names: string[] = [];
+  for (let cur: AccountId | null = id; cur !== null && names.length <= chart.size; ) {
+    const a = chart.get(cur);
+    if (!a) break;
+    names.unshift(a.name);
+    cur = a.parent;
+  }
+  return names;
+}
+
+/** `accountPath` joined for display, e.g. "Vanguard › VTI". */
+export function accountLabel(chart: Chart, id: AccountId): string {
+  return accountPath(chart, id).join(' › ');
+}
+
 export function isNominal(a: Account | undefined): boolean {
   return a !== undefined && (a.type === 'income' || a.type === 'expense');
 }
