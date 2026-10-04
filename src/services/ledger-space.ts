@@ -7,7 +7,8 @@
  * (`ledger/journal`), the payee list (`ledger/payees`), posting entries, reversals, and edits to the journal, period
  * closes to `checkpoints`, receipts as
  * encrypted blobs, reading a journal segment, and fetching and decrypting messages for the
- * sync (sync.ts); the other State documents come in later issues.
+ * sync (sync.ts); the other State documents come in later issues. A post that loses the
+ * race for its topic's chain is retried against the new head (topic-append.ts).
  */
 
 import { ChainError, decodeUrlSafeBase64, NotFoundError, Space, type Message } from 'reeeductio';
@@ -37,6 +38,7 @@ import {
   type DocSpec,
   type StateBackend,
 } from './state-store.js';
+import { appendMessage, type TopicBackend } from './topic-append.js';
 
 export const ACCOUNTS: DocSpec<'ledger/accounts'> = {
   path: 'ledger/accounts',
@@ -86,6 +88,7 @@ export class InvalidEntryError extends Error {
 export class LedgerSpace {
   readonly space: Space;
   private readonly state: StateBackend;
+  private readonly topics: TopicBackend;
   private authPromise: Promise<void> | null = null;
   /** Years seen listed in `ledger/journal`. Years are never removed, so this never goes stale. */
   private readonly listedYears = new Set<number>();
@@ -99,6 +102,7 @@ export class LedgerSpace {
       fetch: fetch.bind(window),
     });
     this.state = sdkStateBackend(this.space, () => this.authenticate());
+    this.topics = sdkTopicBackend(this.space, () => this.authenticate());
   }
 
   get spaceId(): string {
@@ -186,8 +190,9 @@ export class LedgerSpace {
    * that segment is open (`Projection.segmentOpen`). An entry with `replaces` needs `replaced`,
    * the entry it names (`Projection.reversalTarget`). Returns the new message's ID.
    *
-   * A `ChainError` means another message landed on the segment first. It is not retried
-   * here (0017).
+   * If another message lands on the segment first, the post is retried against the new
+   * head. Nothing in the rules depends on the segment's other messages, so the entry is
+   * not checked again.
    */
   async postEntry(entry: Entry, segmentOpen: boolean, replaced?: ReversalTarget): Promise<MsgId> {
     const [chart, payees] = await Promise.all([
@@ -208,7 +213,8 @@ export class LedgerSpace {
    * whether the reversal's own segment is open. Returns the new message's ID.
    *
    * Another device may reverse the same entry between the check and the post; the fold
-   * then reports the second reversal as an anomaly. A `ChainError` is not retried (0017).
+   * then reports the second reversal as an anomaly. Like `postEntry`, a post that loses
+   * the race for the segment is retried.
    */
   async postReversal(reversal: Reversal, target: ReversalTarget | undefined, segmentOpen: boolean): Promise<MsgId> {
     const chart = chartOf(await this.loadAccounts());
@@ -224,7 +230,8 @@ export class LedgerSpace {
    * messages' IDs.
    *
    * Edits in one message stand or fall separately, and so do messages: if a post fails,
-   * the ones before it stay posted. A `ChainError` is not retried (0017).
+   * the ones before it stay posted. Like `postEntry`, a post that loses the race for the
+   * segment is retried.
    */
   async postEdits(edits: readonly Edit[], targets: ReadonlyMap<MsgId, EditTarget>): Promise<MsgId[]> {
     const [chart, payees] = await Promise.all([
@@ -250,24 +257,23 @@ export class LedgerSpace {
    * (`Projection.segmentOpen`). Returns the new message's ID.
    *
    * A message posted to the segment between reading its head and posting the close is
-   * left unlocked, and with `final` it is ignored by the fold. A `ChainError` is not
-   * retried (0017).
+   * left unlocked, and with `final` it is ignored by the fold. If another close lands on
+   * `checkpoints` first, the close is rebuilt on the segment's new head and posted again.
    */
   async postClose(period: string, opts: { final: boolean; segmentOpen: boolean }): Promise<MsgId> {
     const year = periodYear(period);
     if (year === undefined) throw new InvalidEntryError([`${period} is not a year, month, or quarter`]);
     const topic = segmentOf(year);
     const years = await this.loadJournalYears();
-    await this.authenticate();
-    const head = await topicHead(this.space, topic);
-    if (head === null) throw new InvalidEntryError([`${topic} has nothing to close`]);
-    const close = periodClose(period, head as MsgId, opts.final);
-    const problems = closePostProblems(close, { years, segmentOpen: () => opts.segmentOpen });
-    if (problems.length > 0) throw new InvalidEntryError(problems);
-    const data = new TextEncoder().encode(encodeMessage('ledger.checkpoint', close));
-    const prev = await topicHead(this.space, 'checkpoints');
-    const { message_hash } = await this.space.postEncryptedMessage('checkpoints', 'ledger.checkpoint', data, prev);
-    return message_hash as MsgId;
+    const id = await appendMessage(this.topics, 'checkpoints', 'ledger.checkpoint', async () => {
+      const head = await this.topics.head(topic);
+      if (head === null) throw new InvalidEntryError([`${topic} has nothing to close`]);
+      const close = periodClose(period, head as MsgId, opts.final);
+      const problems = closePostProblems(close, { years, segmentOpen: () => opts.segmentOpen });
+      if (problems.length > 0) throw new InvalidEntryError(problems);
+      return new TextEncoder().encode(encodeMessage('ledger.checkpoint', close));
+    });
+    return id as MsgId;
   }
 
   /** Encrypts `bytes` under a fresh key and uploads them, for an entry's `receipts`. */
@@ -287,20 +293,17 @@ export class LedgerSpace {
   /**
    * Posts `msg` to the segment of `year`, listing the year in `ledger/journal` first, so
    * no segment exists that a reader can't find. The caller picks the year by the
-   * message type's routing rule (design/SCHEMAS.md).
+   * message type's routing rule (design/SCHEMAS.md). Retried if another message lands
+   * on the segment first.
    */
   private async postToSegment<T extends JournalType>(
     year: number,
     type: T,
     msg: MessageTypes[T],
   ): Promise<MsgId> {
-    const topic = segmentOf(year);
     const data = new TextEncoder().encode(encodeMessage(type, msg));
     await this.listYear(year);
-    await this.authenticate();
-    const prev = await topicHead(this.space, topic);
-    const { message_hash } = await this.space.postEncryptedMessage(topic, type, data, prev);
-    return message_hash as MsgId;
+    return (await appendMessage(this.topics, segmentOf(year), type, () => data)) as MsgId;
   }
 
   /** Makes sure `year` is listed in `ledger/journal`. Costs nothing once it has been seen. */
@@ -421,6 +424,27 @@ async function topicHead(space: Space, topic: string): Promise<string | null> {
     { useCache: false },
   );
   return messages[0]?.message_hash ?? null;
+}
+
+/** Topics through the SDK, each encrypted under its own topic key. */
+function sdkTopicBackend(space: Space, ready: () => Promise<void>): TopicBackend {
+  return {
+    async head(topic) {
+      await ready();
+      return topicHead(space, topic);
+    },
+
+    async post(topic, type, data, prevHash) {
+      await ready();
+      try {
+        return (await space.postEncryptedMessage(topic, type, data, prevHash)).message_hash;
+      } catch (err) {
+        // A 409 from a post means `prev_hash` is no longer the head.
+        if (err instanceof ChainError) throw new StaleHeadError();
+        throw err;
+      }
+    },
+  };
 }
 
 /** State through the SDK, encrypted under the space's state key. */

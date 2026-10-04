@@ -24,10 +24,10 @@ export interface StateBackend {
   write(path: string, data: Uint8Array, prevHash: string | null): Promise<void>;
 }
 
-/** The state chain moved between reading its head and posting. */
+/** A chain (State's, or a topic's) moved between reading its head and posting. */
 export class StaleHeadError extends Error {
   constructor() {
-    super('the state chain changed before the write landed');
+    super('the chain changed before the write landed');
     this.name = 'StaleHeadError';
   }
 }

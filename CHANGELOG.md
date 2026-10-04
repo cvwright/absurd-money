@@ -146,6 +146,12 @@ All notable changes to this project are documented here. The format follows
   a budget head, balances, and `final` on anything but a whole-year close. The page lists
   every close, marking any whose cited head hasn't synced yet. The projection keeps each
   close's period and message; `PROJECTION_VERSION` is 3 (0016).
+- Posts retry on a chain conflict. When another device posts to the same topic between
+  reading its head and posting, the server's 409 is retried against the new head, up to
+  five attempts, after which `TopicConflictError` says so. This covers every
+  `LedgerSpace` post: entries, reversals, edits, and closes. A close is rebuilt on each
+  attempt, so it cites its segment's newest head. The retry logic (`appendMessage`) sits
+  behind a `TopicBackend` seam and is tested against a fake, like `updateDoc` (0017).
 
 ### Changed
 
