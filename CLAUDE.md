@@ -10,10 +10,16 @@ model.
 - reeeductio TypeScript SDK as a local dependency (`../../reeeductio/typescript-sdk`)
 - SQLite-WASM in OPFS for the local projection
 
+## Commands
+
+- `npm run dev`, `npm run build`, `npm run typecheck`, `npm run lint`, `npm test`
+- Path alias: `@/` is `src/`.
+
 ## Architecture
 
 - **Core** (`src/core/`): pure TypeScript with no DOM or network. Codec, label PRF,
-  validators, and folds. Covered by vitest unit tests.
+  validators, and folds. Covered by vitest unit tests (`*.test.ts`, run in Node).
+  ESLint enforces that core imports only other core modules.
 - **Sync**: SDK messages are decrypted into typed events.
 - **Projection**: events go into SQLite. The projection is a disposable cache that can
   always be rebuilt from the log.

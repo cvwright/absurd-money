@@ -11,8 +11,22 @@ the chain themselves instead of trusting an exported CSV.
 
 ## Status
 
-Design phase. There is no code yet. See [design/ACCOUNTING.md](design/ACCOUNTING.md) for
-the data model and [TODO.md](TODO.md) for the roadmap.
+Early development. The project scaffold is in place, but there are no features yet. See
+[design/ACCOUNTING.md](design/ACCOUNTING.md) for the data model and [TODO.md](TODO.md) for
+the roadmap.
+
+## Development
+
+The reeeductio SDK is a local dependency. Check out
+[reeeductio](https://github.com/reeeductio/reeeductio) next to the `absurdum` directory
+and build its SDK (`npm install && npm run build` in `typescript-sdk`) before installing
+here.
+
+- `npm run dev`: start the dev server
+- `npm run build`: type check and build
+- `npm run typecheck`: TypeScript check only
+- `npm run lint`: ESLint, including the XSS rules and the `src/core` purity rules
+- `npm test`: vitest unit tests
 
 ## Planned stack
 

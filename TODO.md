@@ -7,7 +7,6 @@ Next ID: 0033
 
 ## Milestone 1: Core ledger
 
-- [ ] 0006 Project scaffold: Lit 3 + Vite PWA, linked to the reeeductio TypeScript SDK
 - [ ] 0007 Pure-TS core with no DOM or network: codec, labels, validators, folds, and
   vitest tests
 - [ ] 0008 Space creation, and loading/saving the chart of accounts document

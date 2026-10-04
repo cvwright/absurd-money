@@ -41,6 +41,10 @@ All notable changes to this project are documented here. The format follows
   15 bytes, base64url. It pins the namespace registry and each namespace's input, rejects
   ill-formed strings, and includes test vectors checked against Python and the SDK's
   `@noble/hashes` (0005).
+- Project scaffold: Lit 3, Vite, and vite-plugin-pwa, linked to the local reeeductio
+  TypeScript SDK, with strict TypeScript, ESLint, and vitest. ESLint keeps `src/core`
+  pure: it may import only other core modules and cannot touch DOM or network globals
+  (0006).
 
 ### Changed
 
