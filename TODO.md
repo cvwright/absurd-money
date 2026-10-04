@@ -3,11 +3,12 @@
 Open issues, grouped by milestone, in priority order. An issue is open if and only if it is
 listed here. See [issues/README.md](issues/README.md) for the workflow.
 
-Next ID: 0036
+Next ID: 0039
 
 ## Milestone 1: Core ledger
 
-- [ ] 0010 Manual entry with N splits, validated before posting
+- [ ] [0038](issues/0038-budget-document.md) Envelopes move from `ledger/accounts` to `ledger/budget`
+  (before any real books, since it changes `ledger/accounts` v1)
 - [ ] 0011 Yearly `journal-YYYY` segments and routing
 - [ ] [0012](issues/0012-projection.md) Replay into a SQLite-WASM/OPFS projection, with live updates over WebSocket
 - [ ] 0013 Per-account register, sorted by entry date
@@ -16,6 +17,7 @@ Next ID: 0036
 - [ ] 0014 Reversals
 - [ ] 0015 `ledger.edit`: recategorization (income/expense accounts only), memo, payee,
   receipts
+- [ ] 0036 Payees: choose or add a payee on manual entry, stored in `ledger/payees`
 - [ ] 0016 Period close message and the positional lock rule
 - [ ] 0017 Retry on `ChainConflictError`
 - [ ] [0033](issues/0033-key-storage-at-rest.md) Keys wrapped at rest, unlocked by passkey (WebAuthn
@@ -36,8 +38,9 @@ Next ID: 0036
 
 ## Milestone 4: Envelope budgeting
 
-- [ ] 0024 Envelope equity accounts, and allocations on the `budget` topic
-- [ ] 0025 Budget schedule document, with idempotent materialization of allocations
+- [ ] 0024 Envelopes in `ledger/budget`, and allocations on the `budget` topic
+- [ ] [0037](issues/0037-reallocation.md) `ledger.reallocation` for moves between envelopes
+- [ ] 0025 Budget schedule in `ledger/budget`, with idempotent materialization of allocations
 - [ ] 0026 To Be Budgeted calculation, and moving money between envelopes
 
 ## Later

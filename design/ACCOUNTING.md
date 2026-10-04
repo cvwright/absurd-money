@@ -47,15 +47,15 @@ cost was already paid. You may as well take the integrity guarantees that come w
 | Accounting concept | reeeductio primitive | Notes |
 |---|---|---|
 | **Journal entry** (a balanced transaction, N≥2 splits) | **Message** in a `journal` topic | Immutable, signed, chained. `message_hash` *is* the transaction ID — content-addressed, so a duplicate post is detectable. |
-| **Chart of accounts** — all five types in one place: asset, liability, equity (incl. envelopes), income, expense | **State** — one document at `ledger/accounts` | The whole chart in a single entry. One point read to load, one write per change, full audit history of every chart revision. See "The chart of accounts is one document". |
+| **Chart of accounts** — all five types in one place: asset, liability, equity, income, expense | **State** — one document at `ledger/accounts` | The whole chart in a single entry. One point read to load, one write per change, full audit history of every chart revision. See "The chart of accounts is one document". |
 | **Balances, registers, budget-vs-actual** | Derived — **not stored** | Client-side projection. See "The reporting problem". |
 | **Balance checkpoints / closed periods** | **Message** in a `checkpoints` topic, or a **blob** if large | Signed snapshot anchored to a `journal` chain hash. Makes cold start O(recent) instead of O(all-time). |
 | **Completed statement reconciliation** | **Message** in a `recon` topic | Per-transaction cleared status is *derived* from these, not stored per transaction. O(statements) writes, not O(transactions). |
 | **In-progress reconciliation session; sync cursors, watermarks** | **Data** at one known path | Losable per-device scratch. Not durable record — no CAS, no history, no enumeration. |
 | **Edits** — recategorization, memo, payee, receipts | **Message** (`ledger.edit`) in `journal` | Matrix-style overlay: latest edit per field wins at fold time. Never in State. See "Edits and recategorization". |
 | **Period close** | **Message** in `checkpoints` | Cites a `journal` position; entries at or before it are locked against financial edits. |
-| **Envelope allocation** ("on 2025-12-01, 700 was assigned to Groceries") | **Message** in a `budget` topic | Immutable, dated, authored. The *facts* the envelope fold reads. ~240 messages/year for 20 envelopes. |
-| **Budget schedule** ("Groceries gets 600/month from 2024-01") | **State** — one document at `ledger/budget-schedule` | Declarative intent, not history. Edited a few times a year; the client materializes allocation events from it. See "Envelope budgeting". |
+| **Envelope allocation** ("on 2025-12-01, 700 was assigned to Groceries") and **reallocation** ("on the 14th, 50 moved from Dining to Groceries") | **Message** in a `budget` topic | Immutable, dated, authored. The *facts* the envelope fold reads. ~240 messages/year for 20 envelopes, plus moves. |
+| **Budget configuration** — envelopes, which expense accounts spend from each, budgetable accounts, and the schedule ("Groceries gets 600/month from 2024-01") | **State** — one document at `ledger/budget` | Declarative intent, not history. Edited a few times a year; the client materializes allocation events from the schedule. See "Envelope budgeting". |
 | **Tax lots** (quantity, cost basis, acquisition date) | **Message** in `journal` — the entry that created them | Identified `{message_hash}#{split_index}`. Remaining quantity is *derived* by folding disposals, never stored. |
 | **Market prices / quotes** | **Not in the space** — local cache, optionally **Data** per `(commodity, year)` | Externally sourced, non-authoritative, re-fetchable. Checkpoints carry the prices they used. |
 | **Receipts, statements, imported OFX/CSV files** | **Blob** (content-addressed, E2E-encrypted) | Dedup for free; same statement imported twice is one object. |
@@ -336,7 +336,7 @@ lives in editable data; the IDs never move.
 | Before | After |
 |---|---|
 | `ledger/txmeta/{txid}` | **gone** — edits moved to `ledger.edit` messages in `journal` |
-| `ledger/budgets/{period}/{account}` | **gone** — allocations moved to the `budget` topic; intent lives at the fixed path `ledger/budget-schedule`, with no period in any path |
+| `ledger/budgets/{period}/{account}` | **gone** — allocations moved to the `budget` topic; intent lives at the fixed path `ledger/budget`, with no period in any path |
 | `ledger/payees/{id}` | **one document** at `ledger/payees`, random `payee_` IDs inside |
 | `ledger/staging/{id}` | **gone** — consumption is derived; see "Ingest" |
 | `data/ledger/recon/session/{account}` | `data/ledger/recon/session/{label("recon-session/v1", acct_id)}` |
@@ -350,7 +350,7 @@ design needs a per-message path, pass the hash through the PRF.
 
 ### Where cleartext stays, and why
 
-The small fixed vocabulary of structural segments — `ledger/`, `accounts`, `budget-schedule`,
+The small fixed vocabulary of structural segments — `ledger/`, `accounts`, `budget`,
 `payees`, `rules` — and the topic names `journal`, `recon`, `checkpoints`, `import-staging` stay
 cleartext. This is deliberate, and three verified facts drive it:
 
@@ -487,14 +487,22 @@ September's leftover absorbed half the overspend. Cumulatively 1200 allocated ag
 **Rollover is therefore not a feature you implement — it is what you get by not clamping
 the fold.** Non-rollover is the one that costs extra work. Restated in the jargon above:
 rollover asks the envelope to behave like a *permanent* account rather than a temporary
-one, and the permanent type representing a claim on assets is **equity**. That is what
-forces an envelope to be a real equity account in the chart rather than a view.
+one, and the permanent type representing a claim on assets is **equity**. So an envelope
+is equity in substance, a stock that carries forward, rather than a view of the expense
+account.
 
 ### Envelopes partition equity
 
 Allocating 600 to groceries moves no money — checking is identical before and after. What
 changed is a *claim* on assets you already held, which is exactly what equity is. This is
 textbook fund accounting: one bank account, divided into restricted funds.
+
+**Envelopes are still not accounts in the chart.** No journal split ever posts to one:
+an envelope's balance comes only from allocations and the spending in its paired expense
+accounts. Kept in the chart, envelopes looked postable and needed rules to stop splits
+landing on them, which the budget fold would silently ignore. So they live in
+`ledger/budget` with their own `env_` IDs, which a split cannot name. Reports can still
+show them as a breakdown of equity.
 
 That yields a checkable invariant, the envelope analogue of splits-sum-to-zero:
 
@@ -519,11 +527,10 @@ in a tight month, and above all **moving 50 from Dining to Groceries on the 14th
 most common envelope operation and one no schedule can express. Rollover folds *actual*
 allocations, so the ledger stores facts.
 
-**Allocations** — `ledger.allocation` on the `budget` topic. A mid-month move is two of
-them:
+**Allocations** — `ledger.allocation` on the `budget` topic:
 
 ```json
-{"v": 1, "date": "2025-12-01", "envelope": "acct_Lm3vT8cHq2NbXr5kYwPd",
+{"v": 1, "date": "2025-12-01", "envelope": "env_Lm3vT8cHq2NbXr5kYwPd",
  "amount": "70000", "exp": 2, "cur": "USD"}
 ```
 
@@ -531,20 +538,26 @@ These are *earmarks, not money movements*, so they are deliberately exempt from 
 sum-to-zero invariant that governs `journal`. That exemption is the reason they live in
 their own topic rather than in `journal`: the validator differs.
 
-**The schedule** — one State document at `ledger/budget-schedule`, holding declarative
-intent. Despite the name this is plain data: no substitution, no templating language,
-nothing Jinja-shaped. It is a dated schedule the client reads and materializes from.
+**Reallocations** — a mid-month move is one `ledger.reallocation`, not two allocations.
+Two separate posts could leave a move half done: if the second failed, Dining would be
+down 50, Groceries never credited, and To Be Budgeted off by 50. One message is
+all-or-nothing, and it states the intent ("moved 50 from Dining to Groceries") rather
+than two unrelated adjustments. Its legs must sum to zero, a different validator again,
+hence a separate type. It may have more than two legs, to cover one overspend from
+several envelopes at once.
+
+**The schedule** — part of the one State document at `ledger/budget`, beside the
+envelopes it applies to, holding declarative intent. Despite the name this is plain data:
+no substitution, no templating language, nothing Jinja-shaped. It is a dated schedule the
+client reads and materializes from.
 
 ```json
-{
-  "v": 1,
-  "rev": 7,
-  "envelopes": {
-    "acct_Lm3vT8cHq2NbXr5kYwPd": [
-      {"from": "2024-01", "amount": "60000", "exp": 2, "cur": "USD"},
-      {"from": "2025-12", "amount": "70000", "exp": 2, "cur": "USD"}
-    ]
-  }
+"env_Lm3vT8cHq2NbXr5kYwPd": {
+  "name": "Groceries", "cur": "USD",
+  "schedule": [
+    {"from": "2024-01", "amount": "60000", "exp": 2},
+    {"from": "2025-12", "amount": "70000", "exp": 2}
+  ]
 }
 ```
 
@@ -558,16 +571,22 @@ double-posts the month. Derive it:
 `label("allocation/v1", f"{envelope}|{month}")` — the derive-for-idempotency rule from
 "Opaque identifiers". The `budget` topic's own chain supplies CAS on the check-then-append.
 
-### Why the schedule does not go in the chart document
+### Why budget configuration is its own document
 
-Tempting, since the chart is already one document — but a mid-month envelope move would
-rewrite the *entire chart* on the one shared state chain. Budget tweaks happen several
-times a month; chart edits a few times a year, and that volume gap is the whole premise
-that made the single-document chart sound. It would also grow a timeless document without
-bound (10 years × 12 months × N envelopes, point-read on every cold start), and lose the
-audit trail where it is most wanted: state history would report "the chart changed",
-leaving you to diff documents to find who raised the grocery budget. As allocation events,
-it is signed and attributed per change.
+The envelopes, the expense-to-envelope pairings, the budgetable set, and the schedule are
+one document, `ledger/budget`, rather than fields in the chart. Envelopes take no journal
+splits, so nothing about them belongs in the chart, and keeping it all together means
+creating an envelope with its pairings and schedule is one write. All of it changes a few
+times a year, which is what a single State document suits.
+
+Allocations stay events, not State. Kept in a document, every mid-month envelope move
+would rewrite it on the one shared state chain. Budget moves happen several times a
+month; configuration changes a few times a year, and that volume gap is the whole premise
+that makes a single document sound. It would also grow a timeless document without bound
+(10 years × 12 months × N envelopes, point-read on every cold start), and lose the audit
+trail where it is most wanted: state history would report "the budget changed", leaving
+you to diff documents to find who moved money into Groceries. As allocation events, each
+change is signed and attributed.
 
 ---
 
@@ -1181,7 +1200,7 @@ half-implemented:
    local — proves the derive-don't-store discipline and the audit story.
 3. **CSV import**, client-side, with local review and approval — proves the idempotency
    key and the rules-to-payee mapping. OFX later; a bank-sync tool account maybe never.
-4. **Envelope budgeting** — `budget` topic allocations plus the schedule document. Do this
+4. **Envelope budgeting** — `budget` topic allocations plus the `ledger/budget` document. Do this
    *after* the register view, since it is a fold over two topics and wants the projection
    working first.
 5. **Investments** — commodity accounts, lots, and derived lot depletion. Independent of

@@ -76,7 +76,7 @@ For 0007 to implement in `src/core/`. Names are a suggestion; behavior is the sp
 deriveLabelKeys(symmetricRoot: Uint8Array, spaceId: string): LabelKeys  // all ns_keys, once
 
 importLabel(keys: LabelKeys, input: string): Label   // input from importInputRow / importInputFitid
-allocationLabel(keys: LabelKeys, envelope: AccountId, month: string): Label
+allocationLabel(keys: LabelKeys, envelope: EnvelopeId, month: string): Label
 reconSessionLabel(keys: LabelKeys, account: AccountId): Label
 priceLabel(keys: LabelKeys, commodity: string, year: number): Label
 ```
@@ -96,8 +96,9 @@ and is never reused for a different input.
 
 The `\|` are table escapes; each is a single `|` (U+007C). In every input:
 
-- `envelope` and `account` are `AccountId`s as is: `acct_` and 20 base64url characters,
-  case-sensitive, never folded.
+- `account` is an `AccountId` as is: `acct_` and 20 base64url characters,
+  case-sensitive, never folded. `envelope` is an `EnvelopeId`, likewise: `env_` and 20
+  characters.
 - `month` is a `Month`, `YYYY-MM`, the schedule period being materialized.
 - `commodity` is a `Commodity` as is. Its pattern is already uppercase-only, so there is
   nothing to normalize.
@@ -136,7 +137,7 @@ The `import/v1` inputs are the label inputs from NORMALIZATION.md's vectors.
 | `import/v1` | `acct_7bQ2xV9mKd4TnR1sYgLp\|2026-09-14\|-5\|οδος 5\|#0` | `4008RCU-g26W_5n99gdy` |
 | `import/v1` | `acct_7bQ2xV9mKd4TnR1sYgLp\|fitid\|20260914-ABc01` | `zDD51zVCRVeQmz1JmTl_` |
 | `import/v1` | (empty) | `T-Yt1sI50YSb1UzDrq8a` |
-| `allocation/v1` | `acct_Lm3vT8cHq2NbXr5kYwPd\|2025-12` | `Rbnd0HDlwr8UZRLNe7ES` |
+| `allocation/v1` | `env_Lm3vT8cHq2NbXr5kYwPd\|2025-12` | `8st65e_c184_Zs3jseMu` |
 | `recon-session/v1` | `acct_7bQ2xV9mKd4TnR1sYgLp` | `NmrMaf0goLBM2KEhE6wr` |
 | `price/v1` | `VTI\|2026` | `Cp6QVP1dMUlu8bhe0WHD` |
 | `price/v1` | `acct_7bQ2xV9mKd4TnR1sYgLp` | `OQ4A9jOUebqw-6vnNwGA` |

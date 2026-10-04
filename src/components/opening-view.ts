@@ -13,7 +13,7 @@
 
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { canonical, isCommodity, minor, parseDecimal, type Commodity, type Decimal } from '@/core/amount.js';
+import { canonical, isCommodity, minor, type Commodity } from '@/core/amount.js';
 import { accountLabel, accountPath, chartOf, type Chart } from '@/core/chart.js';
 import { ParseError } from '@/core/errors.js';
 import { isIsoDate, newAccountId, type AccountId, type IsoDate, type MsgId } from '@/core/ids.js';
@@ -23,8 +23,8 @@ import {
   type OpeningLine, type OpeningLot,
 } from '@/core/opening.js';
 import { InvalidEntryError, type LedgerSpace } from '@/services/ledger-space.js';
-import { InvalidDocError } from '@/services/state-store.js';
 import { today } from './dates.js';
+import { amountOf, comparePaths, errorMessage } from './forms.js';
 
 interface LotInput {
   qty: string;
@@ -34,12 +34,6 @@ interface LotInput {
 }
 
 const emptyLot = (): LotInput => ({ qty: '', cost: '', costCur: 'USD', acquired: '' });
-
-function message(err: unknown): string {
-  if (err instanceof InvalidEntryError || err instanceof InvalidDocError) return err.problems.join('. ');
-  if (err instanceof ParseError) return err.message;
-  return err instanceof Error ? err.message : String(err);
-}
 
 interface Row {
   id: AccountId;
@@ -51,28 +45,10 @@ interface Row {
 /** Open accounts of `type`, sorted by path so children follow their parents. */
 function rowsOf(doc: AccountsDoc, type: 'asset' | 'liability'): Row[] {
   const chart = chartOf(doc);
-  const byPath = (x: Row, y: Row) => {
-    for (let i = 0; i < Math.min(x.path.length, y.path.length); i++) {
-      const c = x.path[i].localeCompare(y.path[i]);
-      if (c !== 0) return c;
-    }
-    return x.path.length - y.path.length;
-  };
   return [...chart]
     .filter(([, a]) => a.type === type && a.closed_at === undefined)
     .map(([id, account]) => ({ id, account, path: accountPath(chart, id) }))
-    .sort(byPath);
-}
-
-/** Parses typed text, naming the field in any error. Blank is `undefined`. */
-function amountOf(text: string, minExp: number, field: string): Decimal | undefined {
-  if (text.trim() === '') return undefined;
-  try {
-    return parseDecimal(text, { decimal: '.', minExp });
-  } catch (err) {
-    if (err instanceof ParseError) throw new ParseError(`${field}: ${err.message}`);
-    throw err;
-  }
+    .sort((x, y) => comparePaths(x.path, y.path));
 }
 
 /**
@@ -443,7 +419,7 @@ export class OpeningView extends LitElement {
       this.balances = {};
       this.lots = {};
     } catch (err) {
-      this.error = message(err);
+      this.error = errorMessage(err);
     } finally {
       this.busy = false;
     }

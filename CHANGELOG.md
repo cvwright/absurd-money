@@ -71,6 +71,13 @@ All notable changes to this project are documented here. The format follows
   missing. Accounts are listed by their full path ("Vanguard › VTI"), so positions with
   the same name in different brokerages can be told apart. `LedgerSpace.postEntry` checks
   any entry against the post-time rules before posting it (0009).
+- Manual entry. A New entry page takes a date, an optional memo, and any number of
+  lines, each an account with a debit or a credit, and posts them as one `ledger.entry` to
+  that date's `journal-YYYY` segment. One line per commodity may leave its amount blank and
+  takes the remainder, as in ledger-cli. What each commodity is out of balance by is shown
+  while typing, and the entry is checked in full, then confirmed, before it posts. Closed
+  accounts and envelopes are not offered: envelopes are funded by allocations, not
+  entries. Lots and payees are left to 0027 and 0036 (0010).
 
 ### Changed
 

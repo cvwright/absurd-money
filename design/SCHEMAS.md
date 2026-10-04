@@ -20,7 +20,7 @@ and are never repeated inside `data`.
 | Topic | Message types |
 |---|---|
 | `journal-YYYY` | `ledger.entry`, `ledger.reversal`, `ledger.edit`, `ledger.dismiss`, `ledger.lotadjust` |
-| `budget` | `ledger.allocation` |
+| `budget` | `ledger.allocation`, `ledger.reallocation` |
 | `recon` | `ledger.recon` |
 | `checkpoints` | `ledger.checkpoint` |
 
@@ -45,10 +45,10 @@ and are never repeated inside `data`.
   *Post-time*.
 - **Fold-time rules** decide whether a message counts. Every client must reach the same
   verdict, so they depend only on the message itself, other messages, and State facts
-  that can never change (an account's `type` and `cur` are immutable, and accounts are
-  never deleted). A message that breaks a fold-time rule is **ignored by the fold and
-  surfaced** to the user as an anomaly. It is never repaired. They are listed as
-  *Fold-time*.
+  that can never change (an account's `type` and `cur` and an envelope's `cur` are
+  immutable, and accounts and envelopes are never deleted). A message that breaks a
+  fold-time rule is **ignored by the fold and surfaced** to the user as an anomaly. It is
+  never repaired. They are listed as *Fold-time*.
 
 The server can check neither kind, since it sees only ciphertext.
 
@@ -67,6 +67,7 @@ The server can check neither kind, since it sees only ciphertext.
 | `AccountId` | JSON string | `acct_` + base64url of 15 random bytes: `^acct_[A-Za-z0-9_-]{20}$`. |
 | `PayeeId` | JSON string | `payee_` + 20 characters, as for `AccountId`. |
 | `RuleId` | JSON string | `rule_` + 20 characters, as for `AccountId`. |
+| `EnvelopeId` | JSON string | `env_` + 20 characters, as for `AccountId`. An envelope is not an account, so no split can name one. |
 | `Label` | JSON string | A keyed PRF label ([LABELS.md](LABELS.md), 0005): base64url of 15 bytes, `^[A-Za-z0-9_-]{20}$`. |
 | `BlobRef` | JSON object | `{"blob": "B…", "dek": "…"}`. `blob` is a reeeductio blob ID, `^B[A-Za-z0-9_-]{43}$`. `dek` is the 32-byte AES-256 key from `encryptAndUploadBlob`, base64url with no padding (43 characters). |
 
@@ -386,11 +387,11 @@ Semantics:
 
 ### `ledger.allocation` (topic `budget`)
 
-Assigns money to an envelope, or takes it away. A move between envelopes is two
-allocations.
+Assigns money to an envelope, or takes it away, changing To Be Budgeted. A move between
+envelopes is one `ledger.reallocation`, not two allocations.
 
 ```json
-{"v": 1, "date": "2025-12-01", "envelope": "acct_Lm3vT8cHq2NbXr5kYwPd",
+{"v": 1, "date": "2025-12-01", "envelope": "env_Lm3vT8cHq2NbXr5kYwPd",
  "amount": "70000", "exp": 2, "cur": "USD", "idem": "Qp4rS7tU0vW3xY6zA9bC"}
 ```
 
@@ -398,14 +399,57 @@ allocations.
 |---|---|---|---|
 | `v` | `1` | yes | |
 | `date` | `Date` | yes | |
-| `envelope` | `AccountId` | yes | An `equity` account with `envelope: true`. |
+| `envelope` | `EnvelopeId` | yes | An envelope in `ledger/budget`. |
 | `amount`, `exp`, `cur` | amount | yes | Non-zero. Negative takes money out of the envelope. `cur` equals the envelope's `cur`. |
 | `idem` | `Label` | no | Present only on allocations materialized from the schedule: `label("allocation/v1", "{envelope}\|{YYYY-MM}")`. |
 | `memo` | string | no | Non-empty. |
 
-Fold-time rules: the envelope rule above. Allocations are exempt from sum-to-zero. If two
-allocations carry the same `idem`, only the first in the `budget` chain counts; the
-others are duplicates from a materialization race and are ignored.
+Fold-time rules: `envelope` exists and `cur` equals its `cur`. Allocations are exempt
+from sum-to-zero. If two allocations carry the same `idem`, only the first in the
+`budget` chain counts; the others are duplicates from a materialization race and are
+ignored.
+
+Post-time: the envelope is open.
+
+### `ledger.reallocation` (topic `budget`)
+
+Moves money between envelopes in one message, so a move is never left half done. To Be
+Budgeted is unchanged.
+
+```json
+{"v": 1, "date": "2026-10-14", "cur": "USD", "memo": "cover groceries overspend",
+ "legs": [
+   {"envelope": "env_Hx7nQ2rMw5TkVb7yGgLp", "amount": "-2000", "exp": 2},
+   {"envelope": "env_Lm3vT8cHq2NbXr5kYwPd", "amount": "2000", "exp": 2}
+ ]}
+```
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `v` | `1` | yes | |
+| `date` | `Date` | yes | |
+| `cur` | `Commodity` | yes | The commodity of every leg. A move never crosses commodities, which would need an exchange rate. |
+| `legs` | `Leg[]` | yes | Two or more, each naming a different envelope. |
+| `memo` | string | no | Non-empty. |
+
+A **`Leg`**:
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `envelope` | `EnvelopeId` | yes | An envelope in `ledger/budget`. |
+| `amount` | `Int` | yes | Non-zero. Negative takes money out of the envelope. |
+| `exp` | `Exp` | yes | |
+
+Fold-time rules:
+
+- Every leg's `envelope` exists, and its `cur` equals the message's `cur`.
+- The legs sum to exactly zero.
+
+A reallocation that breaks either rule is ignored whole; no leg counts. Each leg that
+counts adds to its envelope as an allocation would. A reallocation carries no `idem`,
+since only scheduled allocations are materialized.
+
+Post-time: no leg names a closed envelope.
 
 ### `ledger.recon` (topic `recon`)
 
@@ -487,7 +531,7 @@ Semantics:
 | Type | Fields |
 |---|---|
 | `Balance` | `account`, `amount`, `exp`, `cur` |
-| `EnvelopeBalance` | `envelope`, `amount`, `exp`, `cur` |
+| `EnvelopeBalance` | `envelope` (`EnvelopeId`), `amount`, `exp`, `cur` |
 | `OpenLot` | `lot`, `account`, `qty` (`PosInt`), `exp`, `cur`, `basis` (`Amount`, remaining basis), `acquired` |
 | `Price` | `commodity`, `date`, `price` (`Amount`, the price of one whole unit of `commodity`) |
 
@@ -510,15 +554,11 @@ The chart of accounts.
   "rev": 41,
   "accounts": {
     "acct_7bQ2xV9mKd4TnR1sYgLp": {"name": "Checking", "type": "asset", "cur": "USD",
-                                    "parent": null, "budgetable": true},
+                                    "parent": null},
     "acct_Qd8nY2rMw5TkVb7xHgLp": {"name": "Groceries", "type": "expense", "cur": "USD",
-                                    "parent": null,
-                                    "envelope_account": "acct_Lm3vT8cHq2NbXr5kYwPd"},
-    "acct_Lm3vT8cHq2NbXr5kYwPd": {"name": "Groceries", "type": "equity", "cur": "USD",
-                                    "parent": null, "envelope": true},
+                                    "parent": null},
     "acct_Zj4mH8qLv2NxRt6kYwPd": {"name": "Visa 4421", "type": "liability", "cur": "USD",
-                                    "parent": null, "budgetable": true,
-                                    "closed_at": "2024-03-02"}
+                                    "parent": null, "closed_at": "2024-03-02"}
   }
 }
 ```
@@ -532,44 +572,92 @@ An **`Account`**:
 | `cur` | `Commodity` | yes | The one commodity the account holds. **Immutable.** |
 | `parent` | `AccountId` or `null` | yes | Must have the same `type`. No cycles. |
 | `closed_at` | `Date` | no | Closed accounts stay in the chart forever. |
-| `budgetable` | `true` | no | Only on `asset` and `liability` accounts. Counts toward To Be Budgeted. |
-| `envelope` | `true` | no | Only on `equity` accounts. Marks an envelope. |
-| `envelope_account` | `AccountId` | no | Only on `expense` accounts. The envelope this expense is spent from. Must name an account with `envelope: true` and the same `cur`. |
+
+The chart holds no budgeting fields. Envelopes, which expense accounts spend from them,
+and which accounts are budgetable are all in `ledger/budget`.
 
 Rules:
 
 - Accounts are never removed from the document; they are closed. An ID is never reused.
 - `type` and `cur` never change once written, because fold-time rules depend on them.
-- **Envelope pairing points from the expense to the envelope.** That makes it a function:
-  each expense account is spent from at most one envelope, while one envelope may fund
-  several expense accounts. Pointing the other way would let two envelopes claim the
-  same expense.
-- **`budgetable` is allowed on liabilities**, so credit cards can be budgeted. Otherwise a
-  card purchase would lower an envelope without lowering any budgetable asset, and To
-  Be Budgeted would go up. With the card counted, `To Be Budgeted = Σ budgetable asset and
-  liability balances − Σ envelope balances`, and spending on the card leaves it unchanged.
 
-### `ledger/budget-schedule`
+### `ledger/budget`
 
-Declarative budget intent, from which the client materializes allocations.
+Everything about envelope budgeting that is configuration rather than history: the
+envelopes, which expense accounts spend from each, which accounts count toward To Be
+Budgeted, and the monthly schedule the client materializes allocations from. Allocations
+themselves are events on the `budget` topic.
 
 ```json
 {
   "v": 1,
   "rev": 7,
   "envelopes": {
-    "acct_Lm3vT8cHq2NbXr5kYwPd": [
-      {"from": "2024-01", "amount": "60000", "exp": 2, "cur": "USD"},
-      {"from": "2025-12", "amount": "70000", "exp": 2, "cur": "USD"}
-    ]
-  }
+    "env_Lm3vT8cHq2NbXr5kYwPd": {
+      "name": "Groceries", "cur": "USD",
+      "schedule": [
+        {"from": "2024-01", "amount": "60000", "exp": 2},
+        {"from": "2025-12", "amount": "70000", "exp": 2}
+      ]
+    },
+    "env_Hx7nQ2rMw5TkVb7yGgLp": {"name": "Dining", "cur": "USD"}
+  },
+  "spent_from": {
+    "acct_Qd8nY2rMw5TkVb7xHgLp": "env_Lm3vT8cHq2NbXr5kYwPd",
+    "acct_Tp2wK9sNc4XbVm7rJhQd": "env_Lm3vT8cHq2NbXr5kYwPd",
+    "acct_9fKwR4tJmQ7vZx2LnBcH": "env_Hx7nQ2rMw5TkVb7yGgLp"
+  },
+  "budgetable": ["acct_7bQ2xV9mKd4TnR1sYgLp", "acct_Zj4mH8qLv2NxRt6kYwPd"]
 }
 ```
 
-`envelopes` maps an envelope `AccountId` to a non-empty list of steps, sorted by `from`
-with no repeats. A step `{from: Month, amount: Int, exp, cur}` sets the monthly allocation
-from that month until the next step. `amount` may be `"0"` to stop allocating. `cur`
-equals the envelope's `cur`.
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `envelopes` | object | yes | `EnvelopeId` to `Envelope`. May be empty. |
+| `spent_from` | object | yes | An expense `AccountId` to the `EnvelopeId` it is spent from. May be empty. |
+| `budgetable` | `AccountId[]` | yes | Asset and liability accounts that count toward To Be Budgeted. No repeats. May be empty. |
+
+An **`Envelope`**:
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `name` | string | yes | Non-empty. May change. |
+| `cur` | `Commodity` | yes | **Immutable.** |
+| `closed_at` | `Date` | no | Closed envelopes stay in the document forever. |
+| `schedule` | `Step[]` | no | Non-empty, sorted by `from` with no repeats. |
+
+A **`Step`** is `{"from": Month, "amount": Int, "exp": Exp}`, in the envelope's `cur`. It
+sets the monthly allocation from that month until the next step. `amount` may be `"0"` to
+stop allocating.
+
+Rules:
+
+- Envelopes are never removed; they are closed. An ID is never reused. `cur` never
+  changes once written, because fold-time rules depend on it.
+- **`spent_from` points from the expense to the envelope.** That makes it a function:
+  each expense account is spent from at most one envelope, while one envelope may fund
+  several expense accounts (above, Groceries funds two). Pointing the other way would let
+  two envelopes claim the same expense, and its spending would count twice. An expense
+  account with no entry is spent from no envelope.
+- **`budgetable` may include liabilities**, so credit cards can be budgeted. Otherwise a
+  card purchase would lower an envelope without lowering any budgetable asset, and To
+  Be Budgeted would go up. With the card counted, `To Be Budgeted = Σ budgetable asset and
+  liability balances − Σ envelope balances`, and spending on the card leaves it unchanged.
+
+The document refers to accounts in `ledger/accounts`, which is written separately.
+Accounts are never removed and their `type` and `cur` never change, so a reference that
+was valid when written stays valid.
+
+Post-time, checked against the current chart:
+
+- Each `spent_from` key is an `expense` account, and its envelope exists, is open, and has
+  the same `cur`.
+- Each `budgetable` account is an `asset` or `liability` account.
+- No envelope is removed, and no envelope's `cur` changes.
+
+Fold-time: a `spent_from` pairing whose account is not an expense account, or whose
+envelope is missing or in another commodity, is ignored and surfaced, as is a
+`budgetable` entry that is not an asset or liability account.
 
 ### `ledger/payees`
 

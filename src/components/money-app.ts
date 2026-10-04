@@ -2,9 +2,9 @@
  * Money App - Main Application Shell
  *
  * Root component. Without saved credentials it shows the setup view; with them it
- * connects to the space and shows the chart of accounts or the opening balances. After
- * creating a new space it shows the recovery key once, since nothing else can bring the
- * books back.
+ * connects to the space and shows the chart of accounts, a new entry, or the opening
+ * balances. After creating a new space it shows the recovery key once, since nothing else
+ * can bring the books back.
  */
 
 import { LitElement, html, css } from 'lit';
@@ -25,6 +25,7 @@ import type { ConnectDetail, CreateDetail, SetupView } from './setup-view.js';
 import './setup-view.js';
 import './chart-view.js';
 import './opening-view.js';
+import './entry-view.js';
 
 setLogLevel(import.meta.env.DEV ? 'debug' : 'warn');
 
@@ -35,10 +36,11 @@ type View =
   | { kind: 'ready' }
   | { kind: 'failed'; error: string };
 
-type Page = 'accounts' | 'opening';
+type Page = 'accounts' | 'entry' | 'opening';
 
 const PAGES: { page: Page; label: string }[] = [
   { page: 'accounts', label: 'Accounts' },
+  { page: 'entry', label: 'New entry' },
   { page: 'opening', label: 'Opening balances' },
 ];
 
@@ -217,11 +219,20 @@ export class MoneyApp extends LitElement {
             )}
           </nav>
           <main @accounts-changed=${(e: CustomEvent<AccountsDoc>) => (this.accounts = e.detail)}>
-            ${this.page === 'accounts'
-              ? html`<chart-view .ledger=${this.ledger!} .doc=${this.accounts!}></chart-view>`
-              : html`<opening-view .ledger=${this.ledger!} .doc=${this.accounts!}></opening-view>`}
+            ${this.renderPage()}
           </main>
         `;
+    }
+  }
+
+  private renderPage() {
+    switch (this.page) {
+      case 'accounts':
+        return html`<chart-view .ledger=${this.ledger!} .doc=${this.accounts!}></chart-view>`;
+      case 'entry':
+        return html`<entry-view .ledger=${this.ledger!} .doc=${this.accounts!}></entry-view>`;
+      case 'opening':
+        return html`<opening-view .ledger=${this.ledger!} .doc=${this.accounts!}></opening-view>`;
     }
   }
 
