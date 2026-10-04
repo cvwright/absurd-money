@@ -100,6 +100,11 @@ All notable changes to this project are documented here. The format follows
   each account's balance, and the header shows sync status. Signing out deletes the
   database. Replaying 10k entries takes about 0.5 s in Node, and one more entry about
   0.1 s (0012).
+- Per-account register: every split posted to an account, sorted by entry date and then
+  chain position, with the running balance (summed in `bigint`), the effective payee and
+  memo, and the transaction's other accounts. Reached from the nav or by clicking an
+  account in the chart, and refreshed as the projection changes. Reversed entries and
+  reversals are marked but not yet collapsed into their net (0014) (0013).
 
 ### Changed
 

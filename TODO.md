@@ -8,7 +8,6 @@ Next ID: 0042
 ## Milestone 1: Core ledger
 
 - [ ] 0039 Measure cold start against a seeded 10k-entry space, on desktop and on a phone
-- [ ] 0013 Per-account register, sorted by entry date
 - [ ] 0035 Warn before posting opening balances for an account that already has them
   (needs the projection)
 - [ ] 0014 Reversals

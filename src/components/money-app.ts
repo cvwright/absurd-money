@@ -3,7 +3,7 @@
  *
  * Root component. Without saved credentials it shows the setup view; with them it
  * connects to the space, opens the local projection and keeps it in sync, and shows the
- * chart of accounts, a new entry, or the opening balances. After creating a new space it
+ * chart of accounts, an account's register, a new entry, or the opening balances. After creating a new space it
  * shows the recovery key once, since nothing else can bring the books back.
  *
  * Only one tab can have the projection open. Another tab waits, and takes over when
@@ -13,6 +13,7 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import { setLogLevel } from 'reeeductio';
+import type { AccountId } from '@/core/ids.js';
 import type { AccountsDoc } from '@/core/messages.js';
 import {
   clearCredentials,
@@ -28,6 +29,7 @@ import { LiveProjection, type StatusEvent, type SyncStatus } from '@/services/li
 import type { ConnectDetail, CreateDetail, SetupView } from './setup-view.js';
 import './setup-view.js';
 import './chart-view.js';
+import './register-view.js';
 import './opening-view.js';
 import './entry-view.js';
 
@@ -41,10 +43,11 @@ type View =
   | { kind: 'ready' }
   | { kind: 'failed'; error: string };
 
-type Page = 'accounts' | 'entry' | 'opening';
+type Page = 'accounts' | 'register' | 'entry' | 'opening';
 
 const PAGES: { page: Page; label: string }[] = [
   { page: 'accounts', label: 'Accounts' },
+  { page: 'register', label: 'Register' },
   { page: 'entry', label: 'New entry' },
   { page: 'opening', label: 'Opening balances' },
 ];
@@ -204,6 +207,8 @@ export class MoneyApp extends LitElement {
   @state() private syncStatus: SyncStatus = { kind: 'syncing' };
   @state() private accounts: AccountsDoc | null = null;
   @state() private page: Page = 'accounts';
+  /** The account the register shows, kept while visiting other pages. */
+  @state() private registerAccount: AccountId | null = null;
   @query('setup-view') private setupView?: SetupView;
 
   connectedCallback() {
@@ -251,7 +256,8 @@ export class MoneyApp extends LitElement {
                 @click=${() => (this.page = page)}>${label}</button>`,
             )}
           </nav>
-          <main @accounts-changed=${(e: CustomEvent<AccountsDoc>) => (this.accounts = e.detail)}>
+          <main @accounts-changed=${(e: CustomEvent<AccountsDoc>) => (this.accounts = e.detail)}
+            @account-selected=${this.openRegister}>
             ${this.renderPage()}
           </main>
         `;
@@ -263,11 +269,19 @@ export class MoneyApp extends LitElement {
       case 'accounts':
         return html`<chart-view .ledger=${this.ledger!} .doc=${this.accounts!}
           .projection=${this.live!.projection}></chart-view>`;
+      case 'register':
+        return html`<register-view .projection=${this.live!.projection} .doc=${this.accounts!}
+          .account=${this.registerAccount}></register-view>`;
       case 'entry':
         return html`<entry-view .ledger=${this.ledger!} .doc=${this.accounts!}></entry-view>`;
       case 'opening':
         return html`<opening-view .ledger=${this.ledger!} .doc=${this.accounts!}></opening-view>`;
     }
+  }
+
+  private openRegister(e: CustomEvent<AccountId>) {
+    this.registerAccount = e.detail;
+    this.page = 'register';
   }
 
   private renderBackup(key: string) {
@@ -363,6 +377,7 @@ export class MoneyApp extends LitElement {
     this.live = null;
     this.ledger = null;
     this.accounts = null;
+    this.registerAccount = null;
     this.view = { kind: 'setup' };
   }
 }

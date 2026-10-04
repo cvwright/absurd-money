@@ -7,7 +7,7 @@ import type { Projection } from './projection.js';
 
 /** The projection methods the page may call. */
 export const METHODS = [
-  'watermarks', 'watermark', 'append', 'years', 'balances', 'register', 'allocated', 'anomalies', 'halts',
+  'watermarks', 'watermark', 'append', 'doc', 'years', 'balances', 'register', 'allocated', 'anomalies', 'halts',
 ] as const satisfies readonly (keyof Projection)[];
 
 export type Method = (typeof METHODS)[number];

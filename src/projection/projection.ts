@@ -102,6 +102,13 @@ export interface RegisterLine {
   readonly ts: number;
   readonly split: number;
   readonly amount: Amount;
+  /** The account's balance in `amount`'s commodity after this line. */
+  readonly balance: Amount;
+  /**
+   * The effective accounts of the transaction's other splits, after edits: each once, in
+   * split order, without this account.
+   */
+  readonly others: readonly AccountId[];
   /** Effective payee and memo, after edits. */
   readonly payee?: PayeeId;
   readonly memo?: string;
@@ -583,7 +590,7 @@ export class Projection {
   /**
    * Every split posted to `account`, in register order: by date, then by chain position.
    * Lines with the same date are in the same segment, since entries and reversals route
-   * by their date's year.
+   * by their date's year. The running balance is summed in `bigint`, never in SQL.
    */
   register(account: AccountId): RegisterLine[] {
     const rows = this.db.selectObjects(
@@ -594,20 +601,42 @@ export class Projection {
        ORDER BY t.date, t.topic, t.idx, p.split`,
       [account],
     );
-    return rows.map((r) => ({
-      txn: r.id as MsgId,
-      kind: r.kind as TxnKind,
-      topic: r.topic as string,
-      index: r.idx as number,
-      date: r.date as IsoDate,
-      ts: r.ts as number,
-      split: r.split as number,
-      amount: { amount: BigInt(r.amount as string), exp: r.exp as number, cur: commodity(r.cur as string) },
-      ...(r.payee !== null && { payee: r.payee as PayeeId }),
-      ...(r.memo !== null && { memo: r.memo as string }),
-      ...(r.reverses !== null && { reverses: r.reverses as MsgId }),
-      ...(r.reversed_by !== null && { reversedBy: r.reversed_by as MsgId }),
-    }));
+    const others = new Map<string, AccountId[]>();
+    const counterparts = this.db.selectObjects(
+      `SELECT txn, account FROM postings
+       WHERE txn IN (SELECT txn FROM postings WHERE account = ?) AND account != ?
+       ORDER BY txn, split`,
+      [account, account],
+    );
+    for (const r of counterparts) {
+      let list = others.get(r.txn as string);
+      if (!list) others.set(r.txn as string, (list = []));
+      if (!list.includes(r.account as AccountId)) list.push(r.account as AccountId);
+    }
+
+    const running = new Map<Commodity, Amount>();
+    return rows.map((r) => {
+      const amount: Amount = { amount: BigInt(r.amount as string), exp: r.exp as number, cur: commodity(r.cur as string) };
+      const prev = running.get(amount.cur);
+      const balance = prev ? add(prev, amount) : amount;
+      running.set(amount.cur, balance);
+      return {
+        txn: r.id as MsgId,
+        kind: r.kind as TxnKind,
+        topic: r.topic as string,
+        index: r.idx as number,
+        date: r.date as IsoDate,
+        ts: r.ts as number,
+        split: r.split as number,
+        amount,
+        balance,
+        others: others.get(r.id as string) ?? [],
+        ...(r.payee !== null && { payee: r.payee as PayeeId }),
+        ...(r.memo !== null && { memo: r.memo as string }),
+        ...(r.reverses !== null && { reverses: r.reverses as MsgId }),
+        ...(r.reversed_by !== null && { reversedBy: r.reversed_by as MsgId }),
+      };
+    });
   }
 
   /** Σ allocations per envelope, from the `budget` fold. */

@@ -61,6 +61,32 @@ describe('Projection', () => {
     expect(reg[0].amount).toEqual({ amount: -8423n, exp: 2, cur: USD });
   });
 
+  it('gives each register line its running balance and the other accounts', () => {
+    const p = Projection.open(memoryDb());
+    p.append('state', stateWith());
+    const j = chain();
+    const y25 = chain(500);
+    const open = y25('open', 'ledger.entry', entry('2025-12-31', [usd(A.checking, 50000), usd(A.equity, -50000)]));
+    const shop = j('shop', 'ledger.entry', entry('2026-03-02', [
+      usd(A.checking, -6000), usd(A.groceries, 4000), usd(A.dining, 1500), usd(A.groceries, 500),
+    ]));
+    const pay = j('pay', 'ledger.entry', entry('2026-03-01', [usd(A.checking, 100000), usd(A.salary, -100000)]));
+    // Same date as `shop`, later in the chain.
+    const back = j('back', 'ledger.entry', entry('2026-03-02', [usd(A.checking, 700), usd(A.checking, -200), usd(A.dining, -500)]));
+    p.append('journal-2026', [shop, pay, back]);
+    p.append('journal-2025', [open]);
+
+    const reg = p.register(A.checking);
+    expect(reg.map((l) => [l.txn, l.split])).toEqual([
+      [open.hash, 0], [pay.hash, 0], [shop.hash, 0], [back.hash, 0], [back.hash, 1],
+    ]);
+    expect(reg.map((l) => l.balance.amount)).toEqual([50000n, 150000n, 144000n, 144700n, 144500n]);
+    expect(reg.at(-1)!.balance).toEqual(balanceOf(p.balances(), A.checking, USD));
+    expect(reg[2].others).toEqual([A.groceries, A.dining]); // each once, in split order
+    expect(reg[3].others).toEqual([A.dining]); // not the account itself
+    expect(p.register(A.groceries).map((l) => l.balance.amount)).toEqual([4000n, 4500n]);
+  });
+
   it('skips messages it already has and refuses a broken chain', () => {
     const p = Projection.open(memoryDb());
     p.append('state', stateWith());

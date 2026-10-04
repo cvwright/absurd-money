@@ -1,9 +1,10 @@
 /**
- * Helpers shared by the forms that build entries.
+ * Helpers shared by the forms that build entries, and the views that show amounts.
  */
 
-import { minor, parseDecimal, writerExp, type Amount, type Decimal } from '@/core/amount.js';
+import { minor, neg, parseDecimal, writerExp, type Amount, type Decimal } from '@/core/amount.js';
 import { ParseError } from '@/core/errors.js';
+import type { AccountType } from '@/core/messages.js';
 import { InvalidEntryError } from '@/services/ledger-space.js';
 import { InvalidDocError } from '@/services/state-store.js';
 
@@ -45,4 +46,12 @@ export function formatAmount(a: Amount): string {
   const int = digits.slice(0, digits.length - w.exp);
   const frac = digits.slice(digits.length - w.exp);
   return (negative ? '−' : '') + int + (frac ? `.${frac}` : '');
+}
+
+/** Types whose balances are normally credits, shown with the sign flipped. */
+const CREDIT_NORMAL: ReadonlySet<AccountType> = new Set(['liability', 'equity', 'income']);
+
+/** An amount posted to an account of `type`, signed the way that type is shown. */
+export function shownAs(type: AccountType, a: Amount): Amount {
+  return CREDIT_NORMAL.has(type) ? neg(a) : a;
 }

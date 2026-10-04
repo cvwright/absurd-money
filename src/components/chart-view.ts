@@ -5,13 +5,14 @@
  * reopen. Every change rewrites the whole `ledger/accounts` document through
  * `LedgerSpace.updateAccounts`, which enforces the post-time rules, and fires
  * `accounts-changed` with the document written. Each account shows its balance from the
- * projection, kept current as messages arrive. Envelopes and budgetable accounts are in
+ * projection, kept current as messages arrive. Clicking an account's name fires
+ * `account-selected` to open its register. Envelopes and budgetable accounts are in
  * `ledger/budget`, managed by the budgeting issues (0024).
  */
 
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { isCommodity, neg, type Commodity } from '@/core/amount.js';
+import { isCommodity, type Commodity } from '@/core/amount.js';
 import type { Balances } from '@/core/fold/ledger.js';
 import { newAccountId, type AccountId } from '@/core/ids.js';
 import { ACCOUNT_TYPES, type Account, type AccountsDoc, type AccountType } from '@/core/messages.js';
@@ -19,7 +20,7 @@ import type { ProjectionClient } from '@/projection/client.js';
 import type { LedgerSpace } from '@/services/ledger-space.js';
 import { InvalidDocError } from '@/services/state-store.js';
 import { today } from './dates.js';
-import { formatAmount } from './forms.js';
+import { formatAmount, shownAs } from './forms.js';
 
 const TYPE_LABELS: Record<AccountType, string> = {
   asset: 'Assets',
@@ -28,9 +29,6 @@ const TYPE_LABELS: Record<AccountType, string> = {
   income: 'Income',
   expense: 'Expenses',
 };
-
-/** Types whose balances are normally credits, shown with the sign flipped. */
-const CREDIT_NORMAL: ReadonlySet<AccountType> = new Set(['liability', 'equity', 'income']);
 
 interface Row {
   id: AccountId;
@@ -178,9 +176,14 @@ export class ChartView extends LitElement {
     .name {
       flex: 1;
       min-width: 0;
+      text-align: left;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    button.name:hover {
+      color: var(--color-accent);
     }
 
     .closed .name {
@@ -255,7 +258,7 @@ export class ChartView extends LitElement {
     if (!this.balances) return '';
     const cur = account.cur as Commodity;
     const b = this.balances.get(id)?.get(cur) ?? { amount: 0n, exp: 0, cur };
-    return formatAmount(CREDIT_NORMAL.has(account.type) ? neg(b) : b);
+    return formatAmount(shownAs(account.type, b));
   }
 
   render() {
@@ -315,7 +318,9 @@ export class ChartView extends LitElement {
           ? html`<input class="name" .value=${account.name} autofocus
               @keydown=${(e: KeyboardEvent) => this.renameKey(e, id)}
               @blur=${() => (this.renaming = null)} />`
-          : html`<span class="name">${account.name}</span>`}
+          : html`<button type="button" class="name" title="Open the register"
+              @click=${() => this.dispatchEvent(new CustomEvent<AccountId>('account-selected', { detail: id, bubbles: true }))}
+              >${account.name}</button>`}
         ${closed ? html`<span class="meta">closed ${account.closed_at}</span>` : nothing}
         <span class="balance">${this.balanceText(id, account)}</span>
         <span class="cur">${account.cur}</span>
