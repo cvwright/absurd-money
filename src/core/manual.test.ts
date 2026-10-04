@@ -93,7 +93,6 @@ describe('manualEntry', () => {
     const lines: ManualLine[] = [
       { account: acct('missing'), amount: dec(1n) },
       { account: A.rent, amount: dec(1n) },
-      { account: A.envDining, amount: dec(1n) },
       { account: A.dining, amount: dec(0n) },
       { account: A.checking },
       { account: A.visa },
@@ -101,9 +100,8 @@ describe('manualEntry', () => {
     expect(manualEntry({ date: D, lines }, chart).problems).toEqual([
       'line 1: unknown account',
       'line 2 ("Rent"): account is closed',
-      'line 3 ("Dining"): envelopes are funded by allocations, not entries',
-      'line 4 ("Dining"): amount must not be zero',
-      'line 6 ("Visa"): only one USD line may leave its amount blank',
+      'line 3 ("Dining"): amount must not be zero',
+      'line 5 ("Visa"): only one USD line may leave its amount blank',
     ]);
   });
 
@@ -137,10 +135,9 @@ describe('imbalances', () => {
 });
 
 describe('isPostable', () => {
-  it('excludes closed accounts and envelopes', () => {
+  it('excludes closed accounts', () => {
     expect(isPostable(chart.get(A.checking))).toBe(true);
     expect(isPostable(chart.get(A.rent))).toBe(false);
-    expect(isPostable(chart.get(A.envGroceries))).toBe(false);
     expect(isPostable(undefined)).toBe(false);
   });
 });

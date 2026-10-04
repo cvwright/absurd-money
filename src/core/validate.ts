@@ -8,9 +8,12 @@
  */
 
 import { sumsToZero } from './amount.js';
+import { envelopeOf } from './budget.js';
 import type { Chart } from './chart.js';
 import { yearOf, type Label } from './ids.js';
-import type { Allocation, Entry, LotAdjust, PayeesDoc, Reversal, ReversalSplit } from './messages.js';
+import type {
+  Allocation, BudgetDoc, Entry, LotAdjust, PayeesDoc, Reversal, ReversalSplit,
+} from './messages.js';
 
 function routingProblem(date: string, year: number | undefined): string[] {
   return year !== undefined && Number(date.slice(0, 4)) !== year
@@ -74,10 +77,13 @@ export function lotAdjustProblems(msg: LotAdjust, chart: Chart, year?: number): 
   return problems;
 }
 
-/** Fold-time rules for `ledger.allocation`. */
-export function allocationProblems(msg: Allocation, chart: Chart): string[] {
-  const e = chart.get(msg.envelope);
-  if (!e || e.type !== 'equity' || !e.envelope) return ['envelope is not an envelope account'];
+/**
+ * Fold-time rules for `ledger.allocation`. Envelopes are never removed and their `cur`
+ * never changes, so once the envelope exists the verdict never changes.
+ */
+export function allocationProblems(msg: Allocation, budget: BudgetDoc): string[] {
+  const e = envelopeOf(budget, msg.envelope);
+  if (!e) return ['unknown envelope'];
   if (e.cur !== msg.cur) return [`${msg.cur} allocated to a ${e.cur} envelope`];
   return [];
 }

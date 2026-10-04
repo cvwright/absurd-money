@@ -3,14 +3,15 @@
  *
  * One set of books is one reeeductio space. This wraps the SDK's `Space` with the
  * ledger's operations. For now that is authentication, the chart of accounts
- * (`ledger/accounts`), and posting entries to the journal; reading the journal and the
- * other State documents come in later issues.
+ * (`ledger/accounts`), the budget document (`ledger/budget`), and posting entries to the
+ * journal; reading the journal and the other State documents come in later issues.
  */
 
 import { ChainError, NotFoundError, Space } from 'reeeductio';
-import { chartOf, chartUpdateProblems, EMPTY_CHART } from '@/core/chart.js';
+import { budgetUpdateProblems, EMPTY_BUDGET } from '@/core/budget.js';
+import { chartOf, chartUpdateProblems, EMPTY_CHART, type Chart } from '@/core/chart.js';
 import { segmentFor, type MsgId } from '@/core/ids.js';
-import { encodeMessage, type AccountsDoc, type Entry } from '@/core/messages.js';
+import { encodeMessage, type AccountsDoc, type BudgetDoc, type Entry } from '@/core/messages.js';
 import { entryPostProblems } from '@/core/validate.js';
 import type { SpaceCredentials } from './credentials.js';
 import {
@@ -26,6 +27,20 @@ export const ACCOUNTS: DocSpec<'ledger/accounts'> = {
   empty: EMPTY_CHART,
   problems: chartUpdateProblems,
 };
+
+/**
+ * The budget document's spec, checked against `chart`. A chart read a moment ago is safe
+ * to check against: accounts are never removed and their `type` and `cur` never change,
+ * so a stale chart can only reject a reference to a brand-new account, never accept a bad
+ * one.
+ */
+export function budgetSpec(chart: Chart): DocSpec<'ledger/budget'> {
+  return {
+    path: 'ledger/budget',
+    empty: EMPTY_BUDGET,
+    problems: (prev, next) => budgetUpdateProblems(prev, next, chart),
+  };
+}
 
 /** An entry broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
 export class InvalidEntryError extends Error {
@@ -85,6 +100,22 @@ export class LedgerSpace {
    */
   updateAccounts(edit: (doc: AccountsDoc) => AccountsDoc): Promise<AccountsDoc> {
     return updateDoc(this.state, ACCOUNTS, edit);
+  }
+
+  /** The budget document. A space whose budget was never written has an empty one. */
+  loadBudget(): Promise<BudgetDoc> {
+    // Loading never checks the update rules, so no chart is needed.
+    return loadDoc(this.state, budgetSpec(new Map()));
+  }
+
+  /**
+   * Rewrites the budget document as `edit` of the current one, checked against the
+   * post-time rules and the latest chart. `edit` is re-run on a fresh document if another
+   * write wins the race. Returns the document written.
+   */
+  async updateBudget(edit: (doc: BudgetDoc) => BudgetDoc): Promise<BudgetDoc> {
+    const chart = chartOf(await this.loadAccounts());
+    return updateDoc(this.state, budgetSpec(chart), edit);
   }
 
   /**

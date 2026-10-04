@@ -11,7 +11,9 @@ import { hkdf } from '@noble/hashes/hkdf.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { isCommodity } from './amount.js';
-import { base64url, isAccountId, isMonth, type AccountId, type Label, type Month } from './ids.js';
+import {
+  base64url, isAccountId, isEnvelopeId, isMonth, type AccountId, type EnvelopeId, type Label, type Month,
+} from './ids.js';
 import { isWellFormed } from './normalize.js';
 
 /** The registered namespaces. Each one's input is pinned in LABELS.md. */
@@ -57,8 +59,8 @@ export function importLabel(keys: LabelKeys, input: string): Label {
 }
 
 /** `allocation/v1`: `{envelope}|{month}`, the `idem` of a materialized allocation. */
-export function allocationLabel(keys: LabelKeys, envelope: AccountId, month: Month): Label {
-  if (!isAccountId(envelope) || !isMonth(month)) throw new RangeError('allocationLabel: bad input');
+export function allocationLabel(keys: LabelKeys, envelope: EnvelopeId, month: Month): Label {
+  if (!isEnvelopeId(envelope) || !isMonth(month)) throw new RangeError('allocationLabel: bad input');
   return label(keys, 'allocation/v1', `${envelope}|${month}`);
 }
 

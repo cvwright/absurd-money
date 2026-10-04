@@ -28,18 +28,6 @@ export function chartProblems(doc: AccountsDoc): string[] {
       if (!parent) problems.push(`${id}: unknown parent`);
       else if (parent.type !== a.type) problems.push(`${id}: parent has a different type`);
     }
-    if (a.budgetable && a.type !== 'asset' && a.type !== 'liability') {
-      problems.push(`${id}: budgetable is only for asset and liability accounts`);
-    }
-    if (a.envelope && a.type !== 'equity') {
-      problems.push(`${id}: envelope is only for equity accounts`);
-    }
-    if (a.envelope_account !== undefined) {
-      const e = chart.get(a.envelope_account);
-      if (a.type !== 'expense') problems.push(`${id}: envelope_account is only for expense accounts`);
-      if (!e || !e.envelope) problems.push(`${id}: envelope_account must name an envelope`);
-      else if (e.cur !== a.cur) problems.push(`${id}: envelope has a different commodity`);
-    }
   }
   // Parent cycles. Each walk is bounded by the chart's size.
   for (const id of chart.keys()) {

@@ -14,10 +14,10 @@
 import type { Amount, Commodity } from './amount.js';
 import { CodecError } from './errors.js';
 import {
-  isAccountId, isBlobId, isDek, isIsoDate, isLabel, isLotId, isMonth, isMsgId, isPayeeId,
-  isRuleId, segmentYear,
-  type AccountId, type BlobRef, type IsoDate, type Label, type LotId, type Month, type MsgId,
-  type PayeeId, type RuleId,
+  isAccountId, isBlobId, isDek, isEnvelopeId, isIsoDate, isLabel, isLotId, isMonth, isMsgId,
+  isPayeeId, isRuleId, segmentYear,
+  type AccountId, type BlobRef, type EnvelopeId, type IsoDate, type Label, type LotId,
+  type Month, type MsgId, type PayeeId, type RuleId,
 } from './ids.js';
 import { parseJson, toWire, stringifyJson } from './json.js';
 import { normalizeDescription } from './normalize.js';
@@ -50,6 +50,7 @@ const month = guard(isMonth, 'a Month (YYYY-MM)');
 const msgId = guard(isMsgId, 'a MsgId');
 const lotId = guard(isLotId, 'a LotId');
 const accountId = guard(isAccountId, 'an AccountId');
+const envelopeId = guard(isEnvelopeId, 'an EnvelopeId');
 const payeeId = guard(isPayeeId, 'a PayeeId');
 const ruleId = guard(isRuleId, 'a RuleId');
 const label = guard(isLabel, 'a Label');
@@ -233,7 +234,7 @@ export const decodeLotAdjust: Decoder<LotAdjust> = versioned(
 export interface Allocation {
   readonly v: 1;
   readonly date: IsoDate;
-  readonly envelope: AccountId;
+  readonly envelope: EnvelopeId;
   readonly amount: bigint;
   readonly exp: number;
   readonly cur: Commodity;
@@ -265,7 +266,7 @@ export interface Balance {
 }
 
 export interface EnvelopeBalance {
-  readonly envelope: AccountId;
+  readonly envelope: EnvelopeId;
   readonly amount: bigint;
   readonly exp: number;
   readonly cur: Commodity;
@@ -300,7 +301,7 @@ export interface Checkpoint {
 
 export const decodeAllocation: Decoder<Allocation> = versioned(
   object(
-    { v: v1, date, envelope: accountId, amount: nonZeroInt, exp, cur: commodity },
+    { v: v1, date, envelope: envelopeId, amount: nonZeroInt, exp, cur: commodity },
     { idem: label, memo: nonEmptyString },
   ),
 );
@@ -339,7 +340,7 @@ export const decodeCheckpoint: Decoder<Checkpoint> = versioned(
       },
       {
         balances: arrayOf(object({ account: accountId, amount: int, exp, cur: commodity })),
-        envelopes: arrayOf(object({ envelope: accountId, amount: int, exp, cur: commodity })),
+        envelopes: arrayOf(object({ envelope: envelopeId, amount: int, exp, cur: commodity })),
         lots: arrayOf(
           object({
             lot: lotId, account: accountId, qty: posInt, exp, cur: commodity, basis: amount,
@@ -367,9 +368,6 @@ export interface Account {
   readonly cur: Commodity;
   readonly parent: AccountId | null;
   readonly closed_at?: IsoDate;
-  readonly budgetable?: true;
-  readonly envelope?: true;
-  readonly envelope_account?: AccountId;
 }
 
 export interface AccountsDoc {
@@ -378,17 +376,27 @@ export interface AccountsDoc {
   readonly accounts: Readonly<Record<AccountId, Account>>;
 }
 
+/** A monthly allocation from `from` until the next step, in the envelope's `cur`. */
 export interface ScheduleStep {
   readonly from: Month;
   readonly amount: bigint;
   readonly exp: number;
-  readonly cur: Commodity;
 }
 
-export interface BudgetScheduleDoc {
+export interface Envelope {
+  readonly name: string;
+  readonly cur: Commodity;
+  readonly closed_at?: IsoDate;
+  readonly schedule?: readonly ScheduleStep[];
+}
+
+export interface BudgetDoc {
   readonly v: 1;
   readonly rev: number;
-  readonly envelopes: Readonly<Record<AccountId, readonly ScheduleStep[]>>;
+  readonly envelopes: Readonly<Record<EnvelopeId, Envelope>>;
+  /** Each expense account to the one envelope it is spent from. */
+  readonly spent_from: Readonly<Record<AccountId, EnvelopeId>>;
+  readonly budgetable: readonly AccountId[];
 }
 
 export interface Payee {
@@ -447,12 +455,7 @@ const account: Decoder<Account> = object(
     cur: commodity,
     parent: nullable(accountId),
   },
-  {
-    closed_at: date,
-    budgetable: literal(true),
-    envelope: literal(true),
-    envelope_account: accountId,
-  },
+  { closed_at: date },
 );
 
 /** Shape only. The chart's cross-account rules are in chart.ts. */
@@ -460,20 +463,31 @@ export const decodeAccountsDoc: Decoder<AccountsDoc> = versioned(
   object({ v: v1, rev, accounts: record(isAccountId, account) }),
 );
 
-const scheduleStep: Decoder<ScheduleStep> = object({ from: month, amount: int, exp, cur: commodity });
+const scheduleStep: Decoder<ScheduleStep> = object({ from: month, amount: int, exp });
 
-export const decodeBudgetScheduleDoc: Decoder<BudgetScheduleDoc> = versioned(
+const envelope: Decoder<Envelope> = object(
+  { name: nonEmptyString, cur: commodity },
+  {
+    closed_at: date,
+    schedule: refine(arrayOf(scheduleStep, { min: 1 }), (steps) =>
+      steps.every((s, i) => i === 0 || steps[i - 1].from < s.from)
+        ? undefined
+        : 'steps must be sorted by "from" with no repeats',
+    ),
+  },
+);
+
+/**
+ * Shape only. References to the chart, and from `spent_from` to `envelopes`, are checked
+ * in budget.ts.
+ */
+export const decodeBudgetDoc: Decoder<BudgetDoc> = versioned(
   object({
     v: v1,
     rev,
-    envelopes: record(
-      isAccountId,
-      refine(arrayOf(scheduleStep, { min: 1 }), (steps) =>
-        steps.every((s, i) => i === 0 || steps[i - 1].from < s.from)
-          ? undefined
-          : 'steps must be sorted by "from" with no repeats',
-      ),
-    ),
+    envelopes: record(isEnvelopeId, envelope),
+    spent_from: record(isAccountId, envelopeId),
+    budgetable: arrayOf(accountId, { uniqueBy: (x) => x }),
   }),
 );
 
@@ -576,7 +590,7 @@ export type MessageType = keyof MessageTypes;
 
 export interface StateDocs {
   'ledger/accounts': AccountsDoc;
-  'ledger/budget-schedule': BudgetScheduleDoc;
+  'ledger/budget': BudgetDoc;
   'ledger/payees': PayeesDoc;
   'ledger/rules': RulesDoc;
   'ledger/import-profiles': ImportProfilesDoc;
@@ -596,7 +610,7 @@ const MESSAGE_DECODERS: { [T in MessageType]: Decoder<MessageTypes[T]> } = {
 
 const STATE_DECODERS: { [P in StatePath]: Decoder<StateDocs[P]> } = {
   'ledger/accounts': decodeAccountsDoc,
-  'ledger/budget-schedule': decodeBudgetScheduleDoc,
+  'ledger/budget': decodeBudgetDoc,
   'ledger/payees': decodePayeesDoc,
   'ledger/rules': decodeRulesDoc,
   'ledger/import-profiles': decodeImportProfilesDoc,

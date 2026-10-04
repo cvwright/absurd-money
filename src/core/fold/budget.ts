@@ -1,13 +1,17 @@
 /**
  * The `budget` topic fold and the envelope figures derived from it. See "Envelope
- * budgeting" in design/ACCOUNTING.md and `ledger.allocation` in design/SCHEMAS.md.
+ * budgeting" in design/ACCOUNTING.md, and `ledger.allocation` and `ledger/budget` in
+ * design/SCHEMAS.md.
  */
 
 import { add, sub, type Amount, type Commodity } from '../amount.js';
+import { budgetableAccounts, pairings } from '../budget.js';
 import type { Chart } from '../chart.js';
 import { CodecError } from '../errors.js';
-import type { AccountId, Label, MsgId } from '../ids.js';
-import { decodeMessage, UnknownTypeError, UnknownVersionError, type Allocation } from '../messages.js';
+import type { EnvelopeId, Label, MsgId } from '../ids.js';
+import {
+  decodeMessage, UnknownTypeError, UnknownVersionError, type Allocation, type BudgetDoc, type Envelope,
+} from '../messages.js';
 import { allocationProblems } from '../validate.js';
 import { balanceOf, type Balances } from './ledger.js';
 import type { Anomaly, RawMessage } from './segment.js';
@@ -16,7 +20,7 @@ export interface BudgetFold {
   /** The allocations that count, in chain order. */
   readonly allocations: readonly { readonly id: MsgId; readonly msg: Allocation }[];
   /** Σ allocations per envelope. */
-  readonly allocated: ReadonlyMap<AccountId, Amount>;
+  readonly allocated: ReadonlyMap<EnvelopeId, Amount>;
   readonly anomalies: readonly Anomaly[];
   readonly halted?: { readonly at: MsgId; readonly error: UnknownTypeError | UnknownVersionError };
 }
@@ -26,9 +30,9 @@ export interface BudgetFold {
  * counts is kept; the others are duplicates from a materialization race and are ignored
  * silently.
  */
-export function foldBudget(messages: readonly RawMessage[], chart: Chart): BudgetFold {
+export function foldBudget(messages: readonly RawMessage[], budget: BudgetDoc): BudgetFold {
   const allocations: { id: MsgId; msg: Allocation }[] = [];
-  const allocated = new Map<AccountId, Amount>();
+  const allocated = new Map<EnvelopeId, Amount>();
   const anomalies: Anomaly[] = [];
   const idems = new Set<Label>();
   let halted: BudgetFold['halted'];
@@ -49,7 +53,7 @@ export function foldBudget(messages: readonly RawMessage[], chart: Chart): Budge
       }
       throw e;
     }
-    const problems = allocationProblems(msg, chart);
+    const problems = allocationProblems(msg, budget);
     if (problems.length > 0) {
       anomalies.push({ kind: 'invalid', msg: id, detail: problems.join('; ') });
       continue;
@@ -66,25 +70,23 @@ export function foldBudget(messages: readonly RawMessage[], chart: Chart): Budge
 }
 
 /**
- * `available(e) = Σ allocations to e − Σ spend in the expense accounts paired with e`,
- * unclamped, so rollover is what you get by default.
+ * `available(e) = Σ allocations to e − Σ spend in the expense accounts spent from e`,
+ * unclamped, so rollover is what you get by default. Pairings that don't count (see
+ * `budgetRefProblems`) are ignored.
  */
 export function envelopeAvailable(
+  budget: BudgetDoc,
   chart: Chart,
-  allocated: ReadonlyMap<AccountId, Amount>,
+  allocated: ReadonlyMap<EnvelopeId, Amount>,
   balances: Balances,
-): Map<AccountId, Amount> {
-  const out = new Map<AccountId, Amount>();
-  for (const [id, a] of chart) {
-    if (a.type === 'equity' && a.envelope) {
-      out.set(id, allocated.get(id) ?? { amount: 0n, exp: 0, cur: a.cur });
-    }
+): Map<EnvelopeId, Amount> {
+  const out = new Map<EnvelopeId, Amount>();
+  for (const [id, e] of Object.entries(budget.envelopes) as [EnvelopeId, Envelope][]) {
+    out.set(id, allocated.get(id) ?? { amount: 0n, exp: 0, cur: e.cur });
   }
-  for (const [id, a] of chart) {
-    if (a.type !== 'expense' || a.envelope_account === undefined) continue;
-    const env = out.get(a.envelope_account);
-    if (!env || env.cur !== a.cur) continue;
-    out.set(a.envelope_account, sub(env, balanceOf(balances, id, a.cur)));
+  for (const [account, env] of pairings(budget, chart)) {
+    const avail = out.get(env)!;
+    out.set(env, sub(avail, balanceOf(balances, account, avail.cur)));
   }
   return out;
 }
@@ -94,18 +96,17 @@ export function envelopeAvailable(
  * commodity.
  */
 export function toBeBudgeted(
+  budget: BudgetDoc,
   chart: Chart,
   balances: Balances,
-  available: ReadonlyMap<AccountId, Amount>,
+  available: ReadonlyMap<EnvelopeId, Amount>,
 ): Map<Commodity, Amount> {
   const out = new Map<Commodity, Amount>();
   const plus = (a: Amount) => {
     const prev = out.get(a.cur);
     out.set(a.cur, prev ? add(prev, a) : a);
   };
-  for (const [id, a] of chart) {
-    if (a.budgetable && (a.type === 'asset' || a.type === 'liability')) plus(balanceOf(balances, id, a.cur));
-  }
+  for (const id of budgetableAccounts(budget, chart)) plus(balanceOf(balances, id, chart.get(id)!.cur));
   for (const env of available.values()) plus({ ...env, amount: -env.amount });
   return out;
 }

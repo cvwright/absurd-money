@@ -12,6 +12,7 @@ export type LotId = string & { readonly __brand: 'LotId' };
 export type AccountId = string & { readonly __brand: 'AccountId' };
 export type PayeeId = string & { readonly __brand: 'PayeeId' };
 export type RuleId = string & { readonly __brand: 'RuleId' };
+export type EnvelopeId = string & { readonly __brand: 'EnvelopeId' };
 export type Label = string & { readonly __brand: 'Label' };
 export type BlobId = string & { readonly __brand: 'BlobId' };
 
@@ -27,6 +28,7 @@ const LOT_ID_RE = /^(M[A-Za-z0-9_-]{43})#(0|[1-9][0-9]*)$/;
 const ACCOUNT_ID_RE = /^acct_[A-Za-z0-9_-]{20}$/;
 const PAYEE_ID_RE = /^payee_[A-Za-z0-9_-]{20}$/;
 const RULE_ID_RE = /^rule_[A-Za-z0-9_-]{20}$/;
+const ENVELOPE_ID_RE = /^env_[A-Za-z0-9_-]{20}$/;
 const LABEL_RE = /^[A-Za-z0-9_-]{20}$/;
 const BLOB_ID_RE = /^B[A-Za-z0-9_-]{43}$/;
 const DEK_RE = /^[A-Za-z0-9_-]{43}$/;
@@ -57,6 +59,8 @@ export const isAccountId = (s: unknown): s is AccountId =>
   typeof s === 'string' && ACCOUNT_ID_RE.test(s);
 export const isPayeeId = (s: unknown): s is PayeeId => typeof s === 'string' && PAYEE_ID_RE.test(s);
 export const isRuleId = (s: unknown): s is RuleId => typeof s === 'string' && RULE_ID_RE.test(s);
+export const isEnvelopeId = (s: unknown): s is EnvelopeId =>
+  typeof s === 'string' && ENVELOPE_ID_RE.test(s);
 export const isLabel = (s: unknown): s is Label => typeof s === 'string' && LABEL_RE.test(s);
 export const isBlobId = (s: unknown): s is BlobId => typeof s === 'string' && BLOB_ID_RE.test(s);
 export const isDek = (s: unknown): s is string => typeof s === 'string' && DEK_RE.test(s);
@@ -120,6 +124,7 @@ export function id20(bytes: Uint8Array): string {
 export const newAccountId = (random15: Uint8Array) => `acct_${id20(random15)}` as AccountId;
 export const newPayeeId = (random15: Uint8Array) => `payee_${id20(random15)}` as PayeeId;
 export const newRuleId = (random15: Uint8Array) => `rule_${id20(random15)}` as RuleId;
+export const newEnvelopeId = (random15: Uint8Array) => `env_${id20(random15)}` as EnvelopeId;
 
 // --- Segments -------------------------------------------------------------------------
 

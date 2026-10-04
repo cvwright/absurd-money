@@ -3,12 +3,13 @@
  */
 
 import { chartOf } from './chart.js';
-import type { AccountId, IsoDate, Label, MsgId } from './ids.js';
-import { decodeAccountsDoc } from './messages.js';
+import type { AccountId, EnvelopeId, IsoDate, Label, MsgId } from './ids.js';
+import { decodeAccountsDoc, decodeBudgetDoc } from './messages.js';
 
 const pad = (s: string, n: number) => s.padEnd(n, 'x').slice(0, n);
 
 export const acct = (name: string) => `acct_${pad(name, 20)}` as AccountId;
+export const envelope = (name: string) => `env_${pad(name, 20)}` as EnvelopeId;
 export const msg = (name: string) => `M${pad(name, 43)}` as MsgId;
 export const lbl = (name: string) => pad(name, 20) as Label;
 export const day = (s: string) => s as IsoDate;
@@ -20,8 +21,6 @@ export const A = {
   dining: acct('dining'),
   rent: acct('rent'),
   salary: acct('salary'),
-  envGroceries: acct('envGroceries'),
-  envDining: acct('envDining'),
   equity: acct('opening'),
   vti: acct('vti'),
   tradingVti: acct('tradingVti'),
@@ -34,16 +33,12 @@ export const accountsDoc = decodeAccountsDoc(
     v: 1,
     rev: 1,
     accounts: {
-      [A.checking]: { name: 'Checking', type: 'asset', cur: 'USD', parent: null, budgetable: true },
-      [A.visa]: { name: 'Visa', type: 'liability', cur: 'USD', parent: null, budgetable: true },
-      [A.groceries]: {
-        name: 'Groceries', type: 'expense', cur: 'USD', parent: null, envelope_account: A.envGroceries,
-      },
-      [A.dining]: { name: 'Dining', type: 'expense', cur: 'USD', parent: null, envelope_account: A.envDining },
+      [A.checking]: { name: 'Checking', type: 'asset', cur: 'USD', parent: null },
+      [A.visa]: { name: 'Visa', type: 'liability', cur: 'USD', parent: null },
+      [A.groceries]: { name: 'Groceries', type: 'expense', cur: 'USD', parent: null },
+      [A.dining]: { name: 'Dining', type: 'expense', cur: 'USD', parent: null },
       [A.rent]: { name: 'Rent', type: 'expense', cur: 'USD', parent: null, closed_at: '2025-01-01' },
       [A.salary]: { name: 'Salary', type: 'income', cur: 'USD', parent: null },
-      [A.envGroceries]: { name: 'Groceries', type: 'equity', cur: 'USD', parent: null, envelope: true },
-      [A.envDining]: { name: 'Dining', type: 'equity', cur: 'USD', parent: null, envelope: true },
       [A.equity]: { name: 'Opening', type: 'equity', cur: 'USD', parent: null },
       [A.vti]: { name: 'VTI', type: 'asset', cur: 'VTI', parent: null },
       [A.tradingVti]: { name: 'Trading:VTI', type: 'equity', cur: 'VTI', parent: null },
@@ -55,6 +50,26 @@ export const accountsDoc = decodeAccountsDoc(
 );
 
 export const chart = chartOf(accountsDoc);
+
+export const E = {
+  groceries: envelope('groceries'),
+  dining: envelope('dining'),
+} as const;
+
+/** Groceries and Dining envelopes, each spent from the expense account of that name. */
+export const budgetDoc = decodeBudgetDoc(
+  {
+    v: 1,
+    rev: 1,
+    envelopes: {
+      [E.groceries]: { name: 'Groceries', cur: 'USD' },
+      [E.dining]: { name: 'Dining', cur: 'USD' },
+    },
+    spent_from: { [A.groceries]: E.groceries, [A.dining]: E.dining },
+    budgetable: [A.checking, A.visa],
+  },
+  '',
+);
 
 /** A wire split in USD cents. */
 export const usd = (account: AccountId, cents: number, extra: object = {}) => ({

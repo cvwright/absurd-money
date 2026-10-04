@@ -47,7 +47,7 @@ export type OpeningResult =
 
 /** Whether an account can be the equity side of opening balances in `cur`. */
 export function isOpeningEquity(a: Account | undefined, cur: Commodity): boolean {
-  return a !== undefined && a.type === 'equity' && a.cur === cur && !a.envelope && a.closed_at === undefined;
+  return a !== undefined && a.type === 'equity' && a.cur === cur && a.closed_at === undefined;
 }
 
 /**
@@ -143,7 +143,7 @@ export function openingEntry(input: OpeningInput, chart: Chart): OpeningResult {
       continue;
     }
     if (!isOpeningEquity(chart.get(equity), cur)) {
-      problems.push(`the equity account for ${cur} must be an open, non-envelope ${cur} equity account`);
+      problems.push(`the equity account for ${cur} must be an open ${cur} equity account`);
       continue;
     }
     const offset = neg(sum);

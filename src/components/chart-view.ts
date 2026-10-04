@@ -4,8 +4,8 @@
  * The chart of accounts: list by type and parent, add an account, rename, close, and
  * reopen. Every change rewrites the whole `ledger/accounts` document through
  * `LedgerSpace.updateAccounts`, which enforces the post-time rules, and fires
- * `accounts-changed` with the document written. Envelope and budget flags are left to the
- * budgeting issues (0024).
+ * `accounts-changed` with the document written. Envelopes and budgetable accounts are in
+ * `ledger/budget`, managed by the budgeting issues (0024).
  */
 
 import { LitElement, html, css, nothing } from 'lit';

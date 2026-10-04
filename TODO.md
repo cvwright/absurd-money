@@ -7,8 +7,6 @@ Next ID: 0039
 
 ## Milestone 1: Core ledger
 
-- [ ] [0038](issues/0038-budget-document.md) Envelopes move from `ledger/accounts` to `ledger/budget`
-  (before any real books, since it changes `ledger/accounts` v1)
 - [ ] 0011 Yearly `journal-YYYY` segments and routing
 - [ ] [0012](issues/0012-projection.md) Replay into a SQLite-WASM/OPFS projection, with live updates over WebSocket
 - [ ] 0013 Per-account register, sorted by entry date

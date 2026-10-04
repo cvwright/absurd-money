@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { commodity } from '../amount.js';
+import { budgetRefProblems } from '../budget.js';
 import { allocationLabel, deriveLabelKeys } from '../labels.js';
 import type { Month } from '../ids.js';
-import { A, chart, entry, lbl, msg, usd } from '../testing.js';
+import { A, budgetDoc, chart, E, entry, envelope, lbl, msg, usd } from '../testing.js';
 import { envelopeAvailable, foldBudget, toBeBudgeted } from './budget.js';
 import { balanceOf, balances, importConsumption, reversalAnomalies } from './ledger.js';
 import { foldLots, openLots } from './lots.js';
@@ -200,18 +201,28 @@ describe('foldLots', () => {
 
 describe('budget', () => {
   const keys = deriveLabelKeys(new Uint8Array(32), `S${'A'.repeat(43)}`);
-  const idem = allocationLabel(keys, A.envGroceries, '2026-09' as Month);
+  const idem = allocationLabel(keys, E.groceries, '2026-09' as Month);
   const alloc = (name: string, envelope: string, amount: number, extra: object = {}) =>
     m(name, 'ledger.allocation', { v: 1, date: '2026-09-01', envelope, amount: String(amount), exp: 2, cur: 'USD', ...extra });
 
-  it('dedupes materialized allocations by idem and rejects non-envelopes', () => {
+  it('dedupes materialized allocations by idem and rejects unknown envelopes and accounts', () => {
     const fold = foldBudget(
-      [alloc('a1', A.envGroceries, 60000, { idem }), alloc('a2', A.envGroceries, 60000, { idem }), alloc('a3', A.checking, 1)],
-      chart,
+      [
+        alloc('a1', E.groceries, 60000, { idem }),
+        alloc('a2', E.groceries, 60000, { idem }),
+        alloc('a3', envelope('missing'), 1),
+        alloc('a4', A.checking, 1),
+        alloc('a5', E.dining, 1, { cur: 'EUR' }),
+      ],
+      budgetDoc,
     );
     expect(fold.allocations.map((a) => a.id)).toEqual([msg('a1')]);
-    expect(fold.anomalies.map((a) => a.kind)).toEqual(['invalid']);
-    expect(fold.allocated.get(A.envGroceries)!.amount).toBe(60000n);
+    expect(fold.anomalies.map((a) => [a.kind, a.detail])).toEqual([
+      ['invalid', 'unknown envelope'],
+      ['malformed', expect.stringContaining('EnvelopeId')],
+      ['invalid', 'EUR allocated to a USD envelope'],
+    ]);
+    expect(fold.allocated.get(E.groceries)!.amount).toBe(60000n);
   });
 
   it('To Be Budgeted is unchanged by spending from an envelope, even on a card', () => {
@@ -222,10 +233,44 @@ describe('budget', () => {
       m('card', 'ledger.entry', entry('2026-09-03', [usd(A.visa, -25000), usd(A.groceries, 25000)])),
     ], { chart });
     const b = balances([seg]);
-    const budget = foldBudget([alloc('a1', A.envGroceries, 60000)], chart);
-    const avail = envelopeAvailable(chart, budget.allocated, b);
-    expect(avail.get(A.envGroceries)!.amount).toBe(5000n);
-    expect(avail.get(A.envDining)!.amount).toBe(0n);
-    expect(toBeBudgeted(chart, b, avail).get(USD)!.amount).toBe(40000n);
+    const budget = foldBudget([alloc('a1', E.groceries, 60000)], budgetDoc);
+    const avail = envelopeAvailable(budgetDoc, chart, budget.allocated, b);
+    expect(avail.get(E.groceries)!.amount).toBe(5000n);
+    expect(avail.get(E.dining)!.amount).toBe(0n);
+    expect(toBeBudgeted(budgetDoc, chart, b, avail).get(USD)!.amount).toBe(40000n);
+  });
+
+  it('one envelope funds several expense accounts', () => {
+    const shared = { ...budgetDoc, spent_from: { [A.groceries]: E.groceries, [A.dining]: E.groceries } };
+    const seg = foldSegment('journal-2026', [
+      m('shop', 'ledger.entry', entry('2026-09-02', [usd(A.checking, -30000), usd(A.groceries, 30000)])),
+      m('eat', 'ledger.entry', entry('2026-09-03', [usd(A.checking, -4000), usd(A.dining, 4000)])),
+    ], { chart });
+    const budget = foldBudget([alloc('a1', E.groceries, 60000)], shared);
+    const avail = envelopeAvailable(shared, chart, budget.allocated, balances([seg]));
+    expect(avail.get(E.groceries)!.amount).toBe(26000n);
+    expect(avail.get(E.dining)!.amount).toBe(0n);
+  });
+
+  it('ignores pairings and budgetable accounts that do not count', () => {
+    const bad = {
+      ...budgetDoc,
+      spent_from: { [A.groceries]: E.groceries, [A.checking]: E.dining, [A.dining]: envelope('missing') },
+      budgetable: [A.checking, A.salary],
+    };
+    expect(budgetRefProblems(bad, chart)).toEqual([
+      `spent_from ${A.checking}: not an expense account`,
+      `spent_from ${A.dining}: unknown envelope ${envelope('missing')}`,
+      `budgetable ${A.salary}: not an asset or liability account`,
+    ]);
+    const seg = foldSegment('journal-2026', [
+      m('pay', 'ledger.entry', entry('2026-09-01', [usd(A.checking, 100000), usd(A.salary, -100000)])),
+      m('eat', 'ledger.entry', entry('2026-09-03', [usd(A.checking, -4000), usd(A.dining, 4000)])),
+    ], { chart });
+    const b = balances([seg]);
+    const avail = envelopeAvailable(bad, chart, new Map(), b);
+    expect(avail.get(E.dining)!.amount).toBe(0n);
+    // Only Checking counts: 1000 − 40.
+    expect(toBeBudgeted(bad, chart, b, avail).get(USD)!.amount).toBe(96000n);
   });
 });

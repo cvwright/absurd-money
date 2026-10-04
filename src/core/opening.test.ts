@@ -122,9 +122,9 @@ describe('openingEntry', () => {
     const lines: OpeningLine[] = [{ account: A.checking, balance: dec(1n) }];
     expect(openingEntry({ date: D, lines, equity }, chartOf(closed)).problems).toEqual(['"Checking": account is closed']);
     expect(openingEntry({ date: D, lines: [], equity }, chart).problems).toEqual(['every balance is zero']);
-    const envelope = new Map([[USD, A.envGroceries]]);
-    expect(openingEntry({ date: D, lines, equity: envelope }, chart).problems).toEqual([
-      'the equity account for USD must be an open, non-envelope USD equity account',
+    const income = new Map([[USD, A.salary]]);
+    expect(openingEntry({ date: D, lines, equity: income }, chart).problems).toEqual([
+      'the equity account for USD must be an open USD equity account',
     ]);
   });
 });

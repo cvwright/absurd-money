@@ -5,7 +5,7 @@ import {
   decodeMessage, decodeState, encodeMessage, encodeState, parseMessage, UnknownTypeError,
   UnknownVersionError, type AccountsDoc, type Entry,
 } from './messages.js';
-import { A, accountsDoc, chart, entry, lbl, msg, usd } from './testing.js';
+import { A, accountsDoc, chart, E, entry, lbl, msg, usd } from './testing.js';
 import { entryPostProblems, entryProblems } from './validate.js';
 
 const blob = { blob: `B${'b'.repeat(43)}`, dek: 'k'.repeat(43) };
@@ -133,15 +133,20 @@ describe('State documents', () => {
       v: 1,
       rev: 1,
       accounts: {
-        [A.checking]: { name: 'C', type: 'asset', cur: 'USD', parent: A.visa, envelope: true },
+        [A.checking]: { name: 'C', type: 'asset', cur: 'USD', parent: A.visa },
         [A.visa]: { name: 'V', type: 'asset', cur: 'USD', parent: A.checking },
-        [A.dining]: { name: 'D', type: 'expense', cur: 'USD', parent: null, envelope_account: A.visa },
+        [A.dining]: { name: 'D', type: 'expense', cur: 'USD', parent: A.visa },
       },
     });
     const p = chartProblems(bad);
     expect(p.some((x) => x.includes('cycle'))).toBe(true);
-    expect(p.some((x) => x.includes('envelope is only'))).toBe(true);
-    expect(p.some((x) => x.includes('must name an envelope'))).toBe(true);
+    expect(p).toContain(`${A.dining}: parent has a different type`);
+  });
+  it('the chart has no budgeting fields', () => {
+    for (const field of [{ budgetable: true }, { envelope: true }, { envelope_account: A.visa }]) {
+      const doc = { v: 1, rev: 1, accounts: { [A.checking]: { name: 'C', type: 'asset', cur: 'USD', parent: null, ...field } } };
+      expect(() => decodeState('ledger/accounts', doc)).toThrow(CodecError);
+    }
   });
   it('chart updates keep accounts, types, and commodities', () => {
     const next: AccountsDoc = {
@@ -151,20 +156,32 @@ describe('State documents', () => {
     };
     expect(chartUpdateProblems(accountsDoc, next)).toEqual([`${A.checking}: cur is immutable`]);
   });
-  it('round-trips the budget schedule and rejects unsorted steps', () => {
+  it('round-trips the budget document and rejects unsorted steps', () => {
+    const schedule = [
+      { from: '2024-01', amount: '60000', exp: 2 },
+      { from: '2025-12', amount: '70000', exp: 2 },
+    ];
     const doc = {
       v: 1,
       rev: 7,
       envelopes: {
-        [A.envGroceries]: [
-          { from: '2024-01', amount: '60000', exp: 2, cur: 'USD' },
-          { from: '2025-12', amount: '70000', exp: 2, cur: 'USD' },
-        ],
+        [E.groceries]: { name: 'Groceries', cur: 'USD', schedule },
+        [E.dining]: { name: 'Dining', cur: 'USD', closed_at: '2026-01-01' },
       },
+      spent_from: { [A.groceries]: E.groceries, [A.dining]: E.groceries },
+      budgetable: [A.checking, A.visa],
     };
-    expect(JSON.parse(encodeState('ledger/budget-schedule', decodeState('ledger/budget-schedule', doc)))).toEqual(doc);
-    const unsorted = { ...doc, envelopes: { [A.envGroceries]: [...doc.envelopes[A.envGroceries]].reverse() } };
-    expect(() => decodeState('ledger/budget-schedule', unsorted)).toThrow(CodecError);
+    expect(JSON.parse(encodeState('ledger/budget', decodeState('ledger/budget', doc)))).toEqual(doc);
+    const unsorted = {
+      ...doc,
+      envelopes: { [E.groceries]: { name: 'Groceries', cur: 'USD', schedule: [...schedule].reverse() } },
+    };
+    expect(() => decodeState('ledger/budget', unsorted)).toThrow(CodecError);
+    // Steps take the envelope's cur; envelope keys are EnvelopeIds; budgetable has no repeats.
+    const withCur = { ...doc, envelopes: { [E.groceries]: { name: 'G', cur: 'USD', schedule: [{ ...schedule[0], cur: 'USD' }] } } };
+    expect(() => decodeState('ledger/budget', withCur)).toThrow(CodecError);
+    expect(() => decodeState('ledger/budget', { ...doc, envelopes: { [A.checking]: { name: 'G', cur: 'USD' } } })).toThrow(CodecError);
+    expect(() => decodeState('ledger/budget', { ...doc, budgetable: [A.checking, A.checking] })).toThrow(CodecError);
   });
   it('payees may not chain merges', () => {
     const p = (s: string) => `payee_${s.padEnd(20, 'x')}`;

@@ -31,12 +31,9 @@ export type ManualResult =
   | { readonly entry: Entry; readonly problems?: undefined }
   | { readonly entry?: undefined; readonly problems: readonly string[] };
 
-/**
- * Whether a manual entry may post to `a`. Closed accounts take no new splits, and an
- * envelope's balance comes from allocations on the `budget` topic, never the journal.
- */
+/** Whether a manual entry may post to `a`. Closed accounts take no new splits. */
 export function isPostable(a: Account | undefined): boolean {
-  return a !== undefined && a.closed_at === undefined && !a.envelope;
+  return a !== undefined && a.closed_at === undefined;
 }
 
 /**
@@ -70,7 +67,6 @@ export function manualEntry(input: ManualInput, chart: Chart): ManualResult {
     const a = chart.get(l.account);
     const at = a ? `line ${i + 1} ("${accountLabel(chart, l.account)}")` : `line ${i + 1}`;
     if (!a) problems.push(`${at}: unknown account`);
-    else if (a.envelope) problems.push(`${at}: envelopes are funded by allocations, not entries`);
     else if (a.closed_at !== undefined) problems.push(`${at}: account is closed`);
     if (l.amount?.amount === 0n) problems.push(`${at}: amount must not be zero`);
     if (a && l.amount === undefined) {

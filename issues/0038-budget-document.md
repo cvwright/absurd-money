@@ -49,3 +49,18 @@ the app already writes.
 - Left open for 0024: `spent_from` can change, and re-pairing an expense account moves all
   of its past spending to the new envelope. Decide whether that is wanted, or whether
   pairing needs a start date.
+
+## Resolution
+
+2026-10-04. Done as specified. `EnvelopeId` and `newEnvelopeId` are in `ids.ts`. The
+`ledger/budget` codec is in `messages.ts`, and its rules are in the new `src/core/budget.ts`:
+`budgetRefProblems` (fold-time, to surface), `pairings` and `budgetableAccounts` (the
+references that count), and `budgetUpdateProblems` (post-time, against the chart). The
+budget fold takes the budget document; invalid pairings and budgetable entries are skipped
+there and reported by `budgetRefProblems`, since fold anomalies are tied to a message.
+`LedgerSpace.loadBudget` and `updateBudget` read and rewrite the document, checking it
+against a chart loaded just before the write.
+
+Not done here: a post-time check that an allocation's envelope is open. Nothing posts
+allocations yet; it belongs with 0024. The re-pairing question in the notes stays with
+0024.

@@ -2,7 +2,7 @@
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { describe, expect, it } from 'vitest';
-import type { AccountId, Month } from './ids.js';
+import type { AccountId, EnvelopeId, Month } from './ids.js';
 import {
   allocationLabel, deriveLabelKeys, importLabel, nsKeyForTests, priceLabel, rawLabelForTests,
   reconSessionLabel, type Namespace,
@@ -41,7 +41,7 @@ describe('labels', () => {
 
   it('per-namespace functions', () => {
     expect(importLabel(keys, `${acct}|fitid|20260914-ABc01`)).toBe('zDD51zVCRVeQmz1JmTl_');
-    expect(allocationLabel(keys, 'acct_Lm3vT8cHq2NbXr5kYwPd' as AccountId, '2025-12' as Month)).toBe('Rbnd0HDlwr8UZRLNe7ES');
+    expect(allocationLabel(keys, 'env_Lm3vT8cHq2NbXr5kYwPd' as EnvelopeId, '2025-12' as Month)).toBe('8st65e_c184_Zs3jseMu');
     expect(reconSessionLabel(keys, acct as AccountId)).toBe('NmrMaf0goLBM2KEhE6wr');
     expect(priceLabel(keys, 'VTI', 2026)).toBe('Cp6QVP1dMUlu8bhe0WHD');
   });
@@ -49,7 +49,8 @@ describe('labels', () => {
   it('rejects lone surrogates and bad inputs', () => {
     expect(() => importLabel(keys, '\uD800')).toThrow(RangeError);
     expect(() => priceLabel(keys, 'vti', 2026)).toThrow(RangeError);
-    expect(() => allocationLabel(keys, acct as AccountId, '2025-13' as Month)).toThrow(RangeError);
+    expect(() => allocationLabel(keys, 'env_Lm3vT8cHq2NbXr5kYwPd' as EnvelopeId, '2025-13' as Month)).toThrow(RangeError);
+    expect(() => allocationLabel(keys, acct as unknown as EnvelopeId, '2025-12' as Month)).toThrow(RangeError);
     expect(() => deriveLabelKeys(root.subarray(1), spaceId)).toThrow(RangeError);
   });
 });

@@ -76,8 +76,7 @@ All notable changes to this project are documented here. The format follows
   that date's `journal-YYYY` segment. One line per commodity may leave its amount blank and
   takes the remainder, as in ledger-cli. What each commodity is out of balance by is shown
   while typing, and the entry is checked in full, then confirmed, before it posts. Closed
-  accounts and envelopes are not offered: envelopes are funded by allocations, not
-  entries. Lots and payees are left to 0027 and 0036 (0010).
+  accounts are not offered. Lots and payees are left to 0027 and 0036 (0010).
 
 ### Changed
 
@@ -92,6 +91,15 @@ All notable changes to this project are documented here. The format follows
   user-derived fields of its input, so account IDs and `fitid`s keep their case (0004).
 - Every label namespace carries a version, like every message type: `allocation/v1`,
   `recon-session/v1`, and `price/v1` (0005).
+- Envelopes are no longer accounts in the chart. They live with their own `env_` IDs in a
+  new State document, `ledger/budget`, together with which envelope each expense account
+  is spent from (one envelope may fund several expense accounts, but an expense account
+  is spent from at most one), the budgetable accounts, and the monthly schedule. It
+  replaces `ledger/budget-schedule`. Since no journal split can name an `env_` ID, nothing
+  can post to an envelope. `ledger/accounts` v1 drops `budgetable`, `envelope`, and
+  `envelope_account`, and `LedgerSpace` loads and rewrites `ledger/budget`, checking its
+  references against the chart. Allocations, checkpoint envelope balances, and the
+  `allocation/v1` label take an `EnvelopeId`, with a new test vector in LABELS.md (0038).
 
 - Amounts in the design doc's schema sketches are decimal strings, and every sketch
   carries `v` (0001).
