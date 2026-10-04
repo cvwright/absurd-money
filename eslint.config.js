@@ -54,16 +54,17 @@ export default tseslint.config(
   },
   {
     // Core is pure TypeScript: no DOM, no network, no SDK, no UI. It may import only
-    // other core modules.
+    // other core modules, plus @noble/hashes for the label PRF (design/LABELS.md).
     files: ['src/core/**/*.ts'],
+    ignores: ['src/core/**/*.test.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
         {
           patterns: [
             {
-              regex: '^(?!\\.{1,2}/|@/core/).*',
-              message: 'src/core may import only other core modules.',
+              regex: '^(?!\\.{1,2}/|@/core/|@noble/hashes/).*',
+              message: 'src/core may import only other core modules and @noble/hashes.',
             },
           ],
         },
@@ -75,6 +76,23 @@ export default tseslint.config(
           name,
           message: 'src/core has no DOM or network access.',
         })),
+      ],
+    },
+  },
+  {
+    // Core tests may also import vitest.
+    files: ['src/core/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: '^(?!\\.{1,2}/|@/core/|@noble/hashes/|vitest$).*',
+              message: 'core tests may import only core modules, @noble/hashes, and vitest.',
+            },
+          ],
+        },
       ],
     },
   },

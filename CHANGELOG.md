@@ -45,9 +45,20 @@ All notable changes to this project are documented here. The format follows
   TypeScript SDK, with strict TypeScript, ESLint, and vitest. ESLint keeps `src/core`
   pure: it may import only other core modules and cannot touch DOM or network globals
   (0006).
+- `src/core/`: the pure-TypeScript core, with vitest tests that pass every vector in
+  AMOUNTS.md, ROUNDING.md, NORMALIZATION.md, and LABELS.md. It contains the amount codec
+  and text parser, rounding, the `import/v1` normalization, the label PRF, and a strict
+  JSON reader that rejects duplicate keys. It decodes and encodes every message type and
+  State document, rejecting unknown fields and stopping on an unknown `v` or type. It has
+  the chart rules, fold-time and post-time validators, and folds for: journal segments
+  (edits, the positional lock, freezing), balances, reversal anomalies, import
+  consumption, lots with the basis check, and the budget (envelope available, To Be
+  Budgeted). Recon and checkpoint verification are left to 0018 and 0028 (0007).
 
 ### Changed
 
+- `@noble/hashes` is a direct dependency, and the only non-core import that `src/core`
+  may use, for the label PRF's HKDF and HMAC (0007).
 - Amounts are compared by value, not spelling, everywhere a schema rule says "equals" or
   "is zero" (0002).
 - A checkpoint's `rounding` field names ROUNDING.md. No `v: 1` checkpoint figure depends

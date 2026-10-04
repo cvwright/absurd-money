@@ -13,6 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@noble/hashes": "^1.8.0",
     "lit": "^3.3.3",
     "reeeductio": "file:../../reeeductio/typescript-sdk"
   },
