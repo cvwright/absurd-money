@@ -23,8 +23,9 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import { accountLabel, accountPath, chartOf, type Chart } from '@/core/chart.js';
-import { isIsoDate, yearOf, type AccountId, type MsgId, type PayeeId } from '@/core/ids.js';
+import { isIsoDate, yearOf, type AccountId, type MsgId } from '@/core/ids.js';
 import { ACCOUNT_TYPES, type AccountsDoc, type AccountType, type PayeesDoc } from '@/core/messages.js';
+import { payeeName } from '@/core/payees.js';
 import { defaultReversalDate, inverseSplits, reversalOf, type ReversalTarget } from '@/core/reversal.js';
 import type { ProjectionClient } from '@/projection/client.js';
 import type { RegisterLine } from '@/projection/projection.js';
@@ -66,15 +67,9 @@ interface Draft {
   target: ReversalTarget;
   date: string;
   memo: string;
-  /** The entry's own memo, for re-entering it. */
+  /** The entry's own memo and payee name, for re-entering it. */
   entryMemo?: string;
-}
-
-/** A payee's name, following one merge. */
-function payeeName(doc: PayeesDoc | undefined, id: PayeeId): string {
-  const p = doc?.payees[id];
-  if (!p) return '';
-  return (p.merged_into && doc.payees[p.merged_into]?.name) || p.name;
+  entryPayee?: string;
 }
 
 @customElement('register-view')
@@ -447,7 +442,7 @@ export class RegisterView extends LitElement {
   private renderLine(l: RegisterLine, chart: Chart, type: AccountType) {
     const amount = shownAs(type, l.amount);
     const balance = shownAs(type, l.balance);
-    const payee = l.payee ? payeeName(this.payees, l.payee) : '';
+    const payee = this.payeeOf(l);
     const tag = l.reversedBy ? 'Reversed' : l.replaces ? 'Corrected' : KIND_TAGS[l.kind];
     const others = l.others.map((id) => accountLabel(chart, id) || id);
     const rowClass = l.collapsed ? 'collapsed' : l.reversedBy ? 'reversed' : '';
@@ -561,7 +556,9 @@ export class RegisterView extends LitElement {
       const target = await this.target(l.txn);
       if (target.reversedBy) throw new Error('That entry has already been reversed.');
       this.draftError = '';
-      this.draft = { target, date: defaultReversalDate(target, today()), memo: '', entryMemo: l.memo };
+      this.draft = {
+        target, date: defaultReversalDate(target, today()), memo: '', entryMemo: l.memo, entryPayee: this.payeeOf(l),
+      };
     } catch (err) {
       this.error = errorMessage(err);
     }
@@ -572,10 +569,15 @@ export class RegisterView extends LitElement {
     try {
       const target = await this.target(l.txn);
       if (target.replacedBy) throw new Error('That entry has already been replaced.');
-      this.fireReEnter({ target, ...(l.memo !== undefined && { memo: l.memo }) });
+      this.fireReEnter({ target, ...(l.memo !== undefined && { memo: l.memo }), ...(l.payee && { payee: this.payeeOf(l) }) });
     } catch (err) {
       this.error = errorMessage(err);
     }
+  }
+
+  /** The name of a line's effective payee, or empty. */
+  private payeeOf(l: RegisterLine): string {
+    return l.payee ? payeeName(this.payees, l.payee) : '';
   }
 
   private fireReEnter(detail: ReEnter) {
@@ -597,7 +599,11 @@ export class RegisterView extends LitElement {
       const id = await this.ledger.postReversal(reversal, d.target, segmentOpen);
       this.dialog?.close();
       if (thenReEnter) {
-        this.fireReEnter({ target: { ...d.target, reversedBy: id }, ...(d.entryMemo !== undefined && { memo: d.entryMemo }) });
+        this.fireReEnter({
+          target: { ...d.target, reversedBy: id },
+          ...(d.entryMemo !== undefined && { memo: d.entryMemo }),
+          ...(d.entryPayee && { payee: d.entryPayee }),
+        });
       }
     } catch (err) {
       this.draftError = errorMessage(err);

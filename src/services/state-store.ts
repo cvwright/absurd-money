@@ -75,6 +75,9 @@ export async function loadDoc<P extends StatePath>(
  * Applies `edit` to the current document and writes the result as the next revision.
  * `edit` gets a fresh document on every attempt, so it must be a pure function of it; it
  * may throw to abort. `rev` is set here, not by `edit`. Returns the document written.
+ *
+ * If `edit` returns the document it was given, nothing needs to change: nothing is
+ * written, and that document is returned.
  */
 export async function updateDoc<P extends StatePath>(
   backend: StateBackend,
@@ -84,7 +87,9 @@ export async function updateDoc<P extends StatePath>(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const head = await backend.head();
     const prev = await loadDoc(backend, spec);
-    const next = { ...edit(prev), rev: prev.rev + 1 } as StateDocs[P];
+    const edited = edit(prev);
+    if (edited === prev) return prev;
+    const next = { ...edited, rev: prev.rev + 1 } as StateDocs[P];
     const problems = spec.problems(prev, next);
     if (problems.length > 0) throw new InvalidDocError(spec.path, problems);
     const data = new TextEncoder().encode(encodeState(spec.path, next));

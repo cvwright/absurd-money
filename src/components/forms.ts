@@ -2,9 +2,11 @@
  * Helpers shared by the forms that build entries, and the views that show amounts.
  */
 
+import { html, nothing, type TemplateResult } from 'lit';
 import { minor, neg, parseDecimal, writerExp, type Amount, type Decimal } from '@/core/amount.js';
 import { ParseError } from '@/core/errors.js';
-import type { AccountType } from '@/core/messages.js';
+import type { AccountType, PayeesDoc } from '@/core/messages.js';
+import { cleanPayeeName, findPayee, payeeChoices } from '@/core/payees.js';
 import { InvalidEntryError } from '@/services/ledger-space.js';
 import { InvalidDocError } from '@/services/state-store.js';
 
@@ -54,4 +56,25 @@ const CREDIT_NORMAL: ReadonlySet<AccountType> = new Set(['liability', 'equity', 
 /** An amount posted to an account of `type`, signed the way that type is shown. */
 export function shownAs(type: AccountType, a: Amount): Amount {
   return CREDIT_NORMAL.has(type) ? neg(a) : a;
+}
+
+/**
+ * A labelled text field for a payee's name, suggesting the existing payees. A name that
+ * matches none is marked new; the form adds it when it posts (0036). `id` names the
+ * suggestion list, so it must be unique in the form's shadow root.
+ */
+export function payeeField(
+  id: string,
+  payees: PayeesDoc | undefined,
+  value: string,
+  onInput: (value: string) => void,
+): TemplateResult {
+  const name = cleanPayeeName(value);
+  return html`<label class="payee">
+    Payee
+    <input list=${id} .value=${value} placeholder="Optional" autocomplete="off"
+      @input=${(e: Event) => onInput((e.target as HTMLInputElement).value)} />
+    <datalist id=${id}>${payeeChoices(payees).map((p) => html`<option value=${p.name}></option>`)}</datalist>
+    ${name !== '' && !findPayee(payees, name) ? html`<span class="hint">new</span>` : nothing}
+  </label>`;
 }

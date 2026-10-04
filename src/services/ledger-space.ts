@@ -4,7 +4,7 @@
  * One set of books is one reeeductio space. This wraps the SDK's `Space` with the
  * ledger's operations. For now that is authentication, the chart of accounts
  * (`ledger/accounts`), the budget document (`ledger/budget`), the list of journal years
- * (`ledger/journal`), posting entries, reversals, and edits to the journal, receipts as
+ * (`ledger/journal`), the payee list (`ledger/payees`), posting entries, reversals, and edits to the journal, receipts as
  * encrypted blobs, reading a journal segment, and fetching and decrypting messages for the
  * sync (sync.ts); the other State documents come in later issues.
  */
@@ -16,13 +16,14 @@ import { chartOf, chartUpdateProblems, EMPTY_CHART, type Chart } from '@/core/ch
 import { CodecError } from '@/core/errors.js';
 import type { RawMessage } from '@/core/fold/segment.js';
 import { editPostProblems, packEdits, type EditTarget } from '@/core/edit.js';
-import { base64url, isBlobId, segmentOf, yearOf, type BlobRef, type MsgId } from '@/core/ids.js';
+import { base64url, isBlobId, newPayeeId, segmentOf, yearOf, type BlobRef, type MsgId, type PayeeId } from '@/core/ids.js';
 import { EMPTY_JOURNAL, journalUpdateProblems, withYear } from '@/core/journal.js';
 import { parseJsonBytes } from '@/core/json.js';
 import {
   encodeMessage, isStatePath, TOPIC_TYPES, type AccountsDoc, type BudgetDoc, type Edit, type Entry,
   type MessageTypes, type PayeesDoc, type Reversal,
 } from '@/core/messages.js';
+import { cleanPayeeName, EMPTY_PAYEES, findPayee, payeesUpdateProblems, withPayee } from '@/core/payees.js';
 import { reversalPostProblems, type ReversalTarget } from '@/core/reversal.js';
 import { entryPostProblems } from '@/core/validate.js';
 import type { LogMessage } from '@/projection/projection.js';
@@ -45,6 +46,12 @@ export const JOURNAL: DocSpec<'ledger/journal'> = {
   path: 'ledger/journal',
   empty: EMPTY_JOURNAL,
   problems: journalUpdateProblems,
+};
+
+export const PAYEES: DocSpec<'ledger/payees'> = {
+  path: 'ledger/payees',
+  empty: EMPTY_PAYEES,
+  problems: payeesUpdateProblems,
 };
 
 type JournalType = (typeof TOPIC_TYPES.journal)[number];
@@ -144,6 +151,26 @@ export class LedgerSpace {
     return updateDoc(this.state, budgetSpec(chart), edit);
   }
 
+  /** The payee list. A space whose payees were never written has an empty one. */
+  loadPayees(): Promise<PayeesDoc> {
+    return loadDoc(this.state, PAYEES);
+  }
+
+  /**
+   * The payee named `name` (`findPayee`), added to `ledger/payees` with a random ID if
+   * there is none. Nothing is written if it already exists, including when another device
+   * adds it during the race.
+   */
+  async addPayee(name: string): Promise<PayeeId> {
+    const clean = cleanPayeeName(name);
+    if (clean === '') throw new Error('A payee needs a name.');
+    const found = findPayee(await this.loadPayees(), clean);
+    if (found) return found;
+    const fresh = newPayeeId(crypto.getRandomValues(new Uint8Array(15)));
+    const doc = await updateDoc(this.state, PAYEES, (d) => (findPayee(d, clean) ? d : withPayee(d, fresh, clean)));
+    return findPayee(doc, clean)!;
+  }
+
   /** The years that have a `journal-YYYY` segment, ascending. */
   async loadJournalYears(): Promise<readonly number[]> {
     const { years } = await loadDoc(this.state, JOURNAL);
@@ -153,16 +180,21 @@ export class LedgerSpace {
 
   /**
    * Posts `entry` to the `journal-YYYY` segment of its date, after checking it against
-   * the post-time rules with the latest chart. An entry with `replaces` needs `replaced`,
+   * the post-time rules with the latest chart and payee list. An entry with `replaces` needs `replaced`,
    * the entry it names (`Projection.reversalTarget`). Returns the new message's ID.
    *
    * A `ChainError` means another message landed on the segment first. It is not retried
    * here (0017).
    */
   async postEntry(entry: Entry, replaced?: ReversalTarget): Promise<MsgId> {
-    const chart = chartOf(await this.loadAccounts());
+    const [chart, payees] = await Promise.all([
+      this.loadAccounts().then(chartOf),
+      entry.payee ? this.loadPayees() : undefined,
+    ]);
     // No segment can be frozen until the period close exists (0016).
-    const problems = entryPostProblems(entry, { chart, segmentOpen: true, ...(replaced && { replaced }) });
+    const problems = entryPostProblems(entry, {
+      chart, segmentOpen: true, ...(payees && { payees }), ...(replaced && { replaced }),
+    });
     if (problems.length > 0) throw new InvalidEntryError(problems);
     return this.postToSegment(yearOf(entry.date), 'ledger.entry', entry);
   }
@@ -185,20 +217,18 @@ export class LedgerSpace {
 
   /**
    * Posts `edits` as `ledger.edit` messages, each to its target's segment, after checking
-   * every edit against the post-time rules with the latest chart. `targets` holds each
-   * edited entry as the projection holds it (`Projection.editTarget`), and `payees` the
-   * projection's payee list. Nothing is posted unless every edit passes. Returns the new
+   * every edit against the post-time rules with the latest chart and payee list. `targets`
+   * holds each edited entry as the projection holds it (`Projection.editTarget`). Nothing is posted unless every edit passes. Returns the new
    * messages' IDs.
    *
    * Edits in one message stand or fall separately, and so do messages: if a post fails,
    * the ones before it stay posted. A `ChainError` is not retried (0017).
    */
-  async postEdits(
-    edits: readonly Edit[],
-    targets: ReadonlyMap<MsgId, EditTarget>,
-    payees?: PayeesDoc,
-  ): Promise<MsgId[]> {
-    const chart = chartOf(await this.loadAccounts());
+  async postEdits(edits: readonly Edit[], targets: ReadonlyMap<MsgId, EditTarget>): Promise<MsgId[]> {
+    const [chart, payees] = await Promise.all([
+      this.loadAccounts().then(chartOf),
+      edits.some((e) => e.payee) ? this.loadPayees() : undefined,
+    ]);
     const problems = edits.flatMap((e) =>
       editPostProblems(e, { chart, target: targets.get(e.target), ...(payees && { payees }) }),
     );

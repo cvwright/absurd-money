@@ -11,7 +11,7 @@
 
 import { canonical, neg, sumByCommodity, type Amount, type Commodity, type Decimal } from './amount.js';
 import { accountLabel, type Chart } from './chart.js';
-import type { AccountId, IsoDate, MsgId } from './ids.js';
+import type { AccountId, IsoDate, MsgId, PayeeId } from './ids.js';
 import type { Account, Entry, Split } from './messages.js';
 import { entryProblems } from './validate.js';
 
@@ -25,6 +25,8 @@ export interface ManualInput {
   readonly date: IsoDate;
   readonly lines: readonly ManualLine[];
   readonly memo?: string;
+  /** Checked against `ledger/payees` when the entry posts, not here (0036). */
+  readonly payee?: PayeeId;
   /** The reversed entry this one replaces (0042). */
   readonly replaces?: MsgId;
 }
@@ -96,6 +98,7 @@ export function manualEntry(input: ManualInput, chart: Chart): ManualResult {
     v: 1,
     date: input.date,
     splits,
+    ...(input.payee ? { payee: input.payee } : {}),
     ...(input.memo?.trim() ? { memo: input.memo.trim() } : {}),
     ...(input.replaces ? { replaces: input.replaces } : {}),
   };

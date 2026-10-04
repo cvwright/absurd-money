@@ -715,6 +715,14 @@ envelope is missing or in another commodity, is ignored and surfaced, as is a
 
 Payees are never removed, since entries cite them forever.
 
+A client matches a typed name against `name` after the `import/v1` normalization
+([NORMALIZATION.md](NORMALIZATION.md)), resolving a merged payee to its target, and adds
+a payee only when no name matches. Two devices adding the same name at once can still
+leave two payees with it; that is fixed by merging, and until then the match picks a
+payee not merged away over a merged one, then the lowest ID.
+
+Post-time: `rev` goes up by one, no payee is removed, and no merge chains.
+
 ### `ledger/rules`
 
 Import rules, read in bulk at review time.

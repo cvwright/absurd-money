@@ -6,10 +6,12 @@
  * leave its amount blank and takes the remainder. What is out of balance is shown as you
  * type, and the entry is checked against the post-time rules before it posts.
  *
- * Lots and payees are left to later issues (0027, 0036).
+ * The payee is typed by name, with the existing payees suggested. A name that matches
+ * none is added to `ledger/payees` just before the entry posts (0036). Lots are left to
+ * a later issue (0027).
  *
  * Given `reenter`, the form is a replacement for a reversed entry (0042): it starts as a
- * copy of that entry, with its effective accounts, and posts with `replaces`, so the
+ * copy of that entry, with its effective accounts, memo, and payee, and posts with `replaces`, so the
  * register shows it as the corrected line. Posting or cancelling fires `re-enter-done`.
  */
 
@@ -22,12 +24,13 @@ import { isAccountId, isIsoDate, type AccountId, type IsoDate, type MsgId } from
 import {
   describeImbalance, imbalances, isPostable, manualEntry, type ManualLine,
 } from '@/core/manual.js';
-import { ACCOUNT_TYPES, type AccountsDoc, type AccountType, type Entry } from '@/core/messages.js';
+import { ACCOUNT_TYPES, type AccountsDoc, type AccountType, type Entry, type PayeesDoc } from '@/core/messages.js';
+import { cleanPayeeName, findPayee } from '@/core/payees.js';
 import { defaultReversalDate, type ReversalTarget } from '@/core/reversal.js';
 import type { ProjectionClient } from '@/projection/client.js';
 import { InvalidEntryError, type LedgerSpace } from '@/services/ledger-space.js';
 import { today } from './dates.js';
-import { amountOf, comparePaths, errorMessage, formatAmount } from './forms.js';
+import { amountOf, comparePaths, errorMessage, formatAmount, payeeField } from './forms.js';
 
 /** A reversed entry to re-enter, as `re-enter` events carry it. */
 export interface ReEnter {
@@ -35,6 +38,8 @@ export interface ReEnter {
   readonly target: ReversalTarget;
   /** The entry's effective memo. */
   readonly memo?: string;
+  /** The name of the entry's effective payee. */
+  readonly payee?: string;
 }
 
 const TYPE_LABELS: Record<AccountType, string> = {
@@ -164,6 +169,14 @@ export class EntryView extends LitElement {
     }
 
     .fields .memo input {
+      flex: 1;
+    }
+
+    .fields .payee {
+      flex: 1 1 200px;
+    }
+
+    .fields .payee input {
       flex: 1;
     }
 
@@ -297,6 +310,9 @@ export class EntryView extends LitElement {
 
   @state() private date: string = today();
   @state() private memo = '';
+  /** The payee's name as typed. */
+  @state() private payee = '';
+  @state() private payees: PayeesDoc | undefined;
   @state() private lines: LineInput[] = [emptyLine(), emptyLine()];
   @state() private busy = false;
   @state() private error = '';
@@ -304,8 +320,30 @@ export class EntryView extends LitElement {
   /** The reversed entry this one will replace. */
   @state() private replacing: ReEnter | null = null;
 
+  private readonly onChange = () => void this.loadPayees();
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.projection.addEventListener('change', this.onChange);
+    void this.loadPayees();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.projection.removeEventListener('change', this.onChange);
+  }
+
   willUpdate(changed: Map<PropertyKey, unknown>) {
     if (changed.has('reenter')) this.startReplacing(this.reenter);
+  }
+
+  /** The payees to suggest, from the projection. Posting checks the payee against State. */
+  private async loadPayees() {
+    try {
+      this.payees = (await this.projection.call('doc', 'ledger/payees')) as PayeesDoc | undefined;
+    } catch {
+      // Suggestions only; a name typed without them still finds its payee when posting.
+    }
   }
 
   private startReplacing(r: ReEnter | null) {
@@ -316,6 +354,7 @@ export class EntryView extends LitElement {
     this.error = '';
     this.date = defaultReversalDate(target, today());
     this.memo = r.memo ?? '';
+    this.payee = r.payee ?? '';
     this.lines = target.splits.map((s, i) => {
       const text = formatAmount(s.amount < 0n ? { ...s, amount: -s.amount } : s);
       return { account: target.accounts[i], debit: s.amount > 0n ? text : '', credit: s.amount < 0n ? text : '' };
@@ -325,6 +364,7 @@ export class EntryView extends LitElement {
   private stopReplacing() {
     this.replacing = null;
     this.memo = '';
+    this.payee = '';
     this.lines = [emptyLine(), emptyLine()];
     this.dispatchEvent(new CustomEvent('re-enter-done', { bubbles: true }));
   }
@@ -368,6 +408,7 @@ export class EntryView extends LitElement {
                 <input type="date" required .value=${this.date}
                   @input=${(e: Event) => (this.date = (e.target as HTMLInputElement).value)} />
               </label>
+              ${payeeField('entry-payees', this.payees, this.payee, (v) => (this.payee = v))}
               <label class="memo">
                 Memo
                 <input .value=${this.memo} placeholder="Optional"
@@ -460,9 +501,18 @@ export class EntryView extends LitElement {
       const chart = chartOf(this.doc);
       const lines = this.lines.flatMap((l, i) => lineOf(l, i, chart) ?? []);
       const replacing = this.replacing;
-      const result = manualEntry({ date, lines, memo: this.memo, replaces: replacing?.target.id }, chart);
+      const input = { date, lines, memo: this.memo, replaces: replacing?.target.id };
+      const checked = manualEntry(input, chart);
+      if (checked.problems) throw new InvalidEntryError(checked.problems);
+      const payeeName = cleanPayeeName(this.payee);
+      const known = findPayee(this.payees, payeeName);
+      if (!confirm(this.summary(checked.entry, chart, payeeName, payeeName !== '' && !known))) return;
+
+      // A new payee is added first, so the entry never cites one that doesn't exist. If
+      // the post then fails, the payee stays, unused, for the retry.
+      const payee = known ?? (payeeName === '' ? undefined : await this.ledger.addPayee(payeeName));
+      const result = manualEntry({ ...input, payee }, chart);
       if (result.problems) throw new InvalidEntryError(result.problems);
-      if (!confirm(this.summary(result.entry, chart))) return;
 
       let replaced: ReversalTarget | undefined;
       if (replacing) {
@@ -476,6 +526,7 @@ export class EntryView extends LitElement {
       if (replacing) this.stopReplacing();
       this.posted = { id, date };
       this.memo = '';
+      this.payee = '';
       this.lines = [emptyLine(), emptyLine()];
     } catch (err) {
       this.error = errorMessage(err);
@@ -484,14 +535,15 @@ export class EntryView extends LitElement {
     }
   }
 
-  private summary(entry: Entry, chart: Chart): string {
+  private summary(entry: Entry, chart: Chart, payee: string, newPayee: boolean): string {
     const lines = entry.splits.map((s) => {
       const side = s.amount > 0n ? 'debit' : 'credit';
       return `${accountLabel(chart, s.account)}: ${side} ${canonical(s.amount > 0n ? s : neg(s))} ${s.cur}`;
     });
     const memo = entry.memo ? ` "${entry.memo}"` : '';
     const what = entry.replaces ? 'replacement entry' : 'entry';
-    return `Post this ${what}${memo} dated ${entry.date}? Entries are permanent.\n\n${lines.join('\n')}`;
+    const to = payee ? `\n\nPayee: ${payee}${newPayee ? ' (new)' : ''}` : '';
+    return `Post this ${what}${memo} dated ${entry.date}? Entries are permanent.${to}\n\n${lines.join('\n')}`;
   }
 }
 

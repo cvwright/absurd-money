@@ -130,9 +130,17 @@ All notable changes to this project are documented here. The format follows
   and add that the new account is open, the payee exists, and the segment is open.
   `LedgerSpace.postEdits` packs larger batches into several messages, each under the
   server's size limit. Choosing a payee needs payees in `ledger/payees` (0036) (0015).
+- Payees: the entry form and the edit dialog take a payee by name, suggesting the payees
+  in `ledger/payees`. Names match regardless of case and spacing (the `import/v1`
+  normalization), and a merged payee's name picks the payee it was merged into. A name
+  that matches none is marked new and added with a random `payee_` ID just before the
+  entry or edit posts, and nothing is written if it already exists. Posting checks the
+  payee against the payee list freshly read from State. Re-entering a reversed entry
+  keeps its payee (0036).
 
 ### Changed
 
+- `updateDoc` writes nothing when the edit returns the document unchanged (0036).
 - `@noble/hashes` is a direct dependency, and the only non-core import that `src/core`
   may use, for the label PRF's HKDF and HMAC (0007).
 - Amounts are compared by value, not spelling, everywhere a schema rule says "equals" or

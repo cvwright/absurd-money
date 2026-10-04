@@ -136,6 +136,14 @@ describe('updateDoc', () => {
     expect(state.chain).toHaveLength(2);
   });
 
+  it('writes nothing when the edit changes nothing', async () => {
+    const state = new FakeState();
+    const first = await updateDoc(state, ACCOUNTS, add);
+    const again = await updateDoc(state, ACCOUNTS, (d) => (d.accounts[id] ? d : add(d)));
+    expect(again).toEqual(first);
+    expect(state.writes).toBe(1);
+  });
+
   it('gives up after repeated conflicts', async () => {
     const state = new FakeState();
     state.write = async () => {

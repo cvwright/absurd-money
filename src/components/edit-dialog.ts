@@ -12,6 +12,9 @@
  * first bytes and limited to PDF and common images, so a receipt can never be shown as
  * HTML or SVG in the app's origin; anything else downloads.
  *
+ * The payee is typed by name, as on the entry form; a new name is added to
+ * `ledger/payees` when the edit is saved (0036).
+ *
  * The register calls `open` with the entry as the projection holds it.
  */
 
@@ -19,11 +22,12 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import { accountLabel, accountPath, chartOf, isNominal, type Chart } from '@/core/chart.js';
 import { canRecategorize, editOf, type EditTarget } from '@/core/edit.js';
-import { isPayeeId, type AccountId, type BlobRef, type PayeeId } from '@/core/ids.js';
+import type { AccountId, BlobRef, PayeeId } from '@/core/ids.js';
 import { isPostable } from '@/core/manual.js';
 import type { AccountsDoc, PayeesDoc } from '@/core/messages.js';
+import { cleanPayeeName, findPayee, payeeName } from '@/core/payees.js';
 import type { LedgerSpace } from '@/services/ledger-space.js';
-import { comparePaths, errorMessage, formatAmount } from './forms.js';
+import { comparePaths, errorMessage, formatAmount, payeeField } from './forms.js';
 
 /** A receipt already on the entry, or a file picked here and not yet uploaded. */
 type Receipt = { readonly ref: BlobRef } | { readonly file: File };
@@ -48,14 +52,6 @@ function categoriesOf(chart: Chart, cur: string, current: AccountId): { id: Acco
     .map(([id]) => ({ id, path: accountPath(chart, id) }))
     .sort((x, y) => comparePaths(x.path, y.path))
     .map(({ id, path }) => ({ id, label: path.join(' › ') }));
-}
-
-/** Payees to choose from: those not merged away, by name, plus `current`. */
-function payeeOptions(doc: PayeesDoc | undefined, current: PayeeId | undefined): { id: PayeeId; name: string }[] {
-  return Object.entries(doc?.payees ?? {})
-    .filter(([id, p]) => id === current || p.merged_into === undefined)
-    .map(([id, p]) => ({ id: id as PayeeId, name: p.name }))
-    .sort((x, y) => x.name.localeCompare(y.name));
 }
 
 @customElement('edit-dialog')
@@ -87,6 +83,11 @@ export class EditDialog extends LitElement {
     p {
       margin: 0 0 var(--spacing-md);
       color: var(--color-text-secondary);
+      font-size: var(--font-size-sm);
+    }
+
+    .hint {
+      color: var(--color-text-subdued);
       font-size: var(--font-size-sm);
     }
 
@@ -229,7 +230,9 @@ export class EditDialog extends LitElement {
 
   @state() private target: EditTarget | null = null;
   @state() private memo = '';
-  @state() private payee: PayeeId | '' = '';
+  /** The payee's name as typed, and as it was shown when the dialog opened. */
+  @state() private payee = '';
+  private shownPayee = '';
   @state() private splits = new Map<number, AccountId>();
   @state() private receipts: Receipt[] = [];
   @state() private error = '';
@@ -240,7 +243,7 @@ export class EditDialog extends LitElement {
   open(target: EditTarget): void {
     this.target = target;
     this.memo = target.memo ?? '';
-    this.payee = target.payee ?? '';
+    this.payee = this.shownPayee = target.payee ? payeeName(this.payees, target.payee) : '';
     this.splits = new Map(target.accounts.map((a, i) => [i, a]));
     this.receipts = target.receipts.map((ref) => ({ ref }));
     this.error = '';
@@ -260,7 +263,6 @@ export class EditDialog extends LitElement {
   }
 
   private renderForm(t: EditTarget, chart: Chart) {
-    const payees = payeeOptions(this.payees, t.payee);
     const frozen = t.locked || t.reversedBy !== undefined;
     return html`
       <h3 id="edit-title">Edit this entry</h3>
@@ -279,18 +281,7 @@ export class EditDialog extends LitElement {
           <input .value=${this.memo} placeholder="None"
             @input=${(e: Event) => (this.memo = (e.target as HTMLInputElement).value)} />
         </label>
-        ${payees.length > 0
-          ? html`<label>
-              Payee
-              <select @change=${(e: Event) => {
-                const v = (e.target as HTMLSelectElement).value;
-                this.payee = isPayeeId(v) ? v : '';
-              }}>
-                <option value="" ?selected=${this.payee === ''}>None</option>
-                ${payees.map((p) => html`<option value=${p.id} ?selected=${p.id === this.payee}>${p.name}</option>`)}
-              </select>
-            </label>`
-          : nothing}
+        ${payeeField('edit-payees', this.payees, this.payee, (v) => (this.payee = v))}
       </div>
       <table>
         <thead>
@@ -364,6 +355,16 @@ export class EditDialog extends LitElement {
     }
   }
 
+  /**
+   * The payee for the typed name: `null` for none, else the payee of that name, added if
+   * there is none. The payee is added even if posting the edit then fails.
+   */
+  private async payeeId(): Promise<PayeeId | null> {
+    const name = cleanPayeeName(this.payee);
+    if (name === '') return null;
+    return findPayee(this.payees, name) ?? (await this.ledger.addPayee(name));
+  }
+
   private async save() {
     const t = this.target;
     if (!t) return;
@@ -378,11 +379,11 @@ export class EditDialog extends LitElement {
       this.receipts = receipts.map((ref) => ({ ref }));
       const edit = editOf(t, {
         memo: this.memo,
-        payee: this.payee === '' ? null : this.payee,
+        ...(this.payee !== this.shownPayee && { payee: await this.payeeId() }),
         receipts,
         splits: this.splits,
       });
-      if (edit) await this.ledger.postEdits([edit], new Map([[t.id, t]]), this.payees);
+      if (edit) await this.ledger.postEdits([edit], new Map([[t.id, t]]));
       this.dialog?.close();
     } catch (err) {
       this.error = errorMessage(err);
