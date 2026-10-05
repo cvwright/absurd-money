@@ -1,19 +1,22 @@
 # Message and State Schemas
 
-This is the wire format for everything Absurd Money writes to a space. Every message posted
-to a topic is permanent, so once the first message of a type is posted, its `v: 1` schema
-can never change. The reasoning behind the data model is in [ACCOUNTING.md](ACCOUNTING.md);
-this document only pins the shapes and the rules for validating them. Issue
-[0001](../issues/0001-message-schemas.md) records the decisions made while writing it.
+This is the wire format for everything Absurd Money writes to a space.
+Every message posted to a topic is permanent, so once the first message
+of a type is posted, its `v: 1` schema can never change. The reasoning
+behind the data model is in [ACCOUNTING.md](ACCOUNTING.md); this
+document only pins the shapes and the rules for validating them. Issue
+[0001](../issues/0001-message-schemas.md) records the decisions made
+while writing it.
 
 ## Conventions
 
 ### Envelope
 
-Each message is a reeeductio message. Its `type` is one of the names below and is sent
-**in cleartext**. Its `data` is a UTF-8 JSON object, encrypted under the topic key. State
-documents use the same encoding, at the State path given for each one. Sender, signature,
-`prev_hash`, and server timestamp come from the reeeductio envelope
+Each message is a reeeductio message. Its `type` is one of the names
+below and is sent **in cleartext**. Its `data` is a UTF-8 JSON object,
+encrypted under the topic key. State documents use the same encoding, at
+the State path given for each one. Sender, signature, `prev_hash`, and
+server timestamp come from the reeeductio envelope
 ([types.ts](https://github.com/reeeductio/reeeductio/blob/main/typescript-sdk/src/types.ts))
 and are never repeated inside `data`.
 
@@ -27,28 +30,33 @@ and are never repeated inside `data`.
 ### Versioning and strictness
 
 - Every message and every State document has `"v": 1`, an integer.
-- **Unknown fields are invalid.** A reader never guesses at a field it doesn't
-  understand, because a field it skipped could have changed the meaning of the message
-  (the way `replaces` or `from_lots` would). Adding a field means bumping `v`.
-- **An unknown `v` stops the fold.** A client that meets a version newer than it knows
-  must not skip the message, since skipping a ledger fact gives wrong balances. It stops
-  folding that topic and asks the user to update.
-- A State document's history keeps every old revision forever, so readers of historical
-  revisions must keep supporting every `v` that was ever written.
-- JSON objects must not contain duplicate keys. A field that is optional and absent is
-  omitted. It is never `null` unless the schema says `null` means something.
+- **Unknown fields are invalid.** A reader never guesses at a field it
+  doesn't understand, because a field it skipped could have changed the
+  meaning of the message (the way `replaces` or `from_lots` would).
+  Adding a field means bumping `v`.
+- **An unknown `v` stops the fold.** A client that meets a version newer
+  than it knows must not skip the message, since skipping a ledger fact
+  gives wrong balances. It stops folding that topic and asks the user to
+  update.
+- A State document's history keeps every old revision forever, so
+  readers of historical revisions must keep supporting every `v` that
+  was ever written.
+- JSON objects must not contain duplicate keys. A field that is optional
+  and absent is omitted. It is never `null` unless the schema says
+  `null` means something.
 
 ### Two kinds of validation
 
-- **Post-time checks** are run by the client before posting and may depend on anything
-  the client knows: the current chart, today's date, the projection. They are listed as
-  *Post-time*.
-- **Fold-time rules** decide whether a message counts. Every client must reach the same
-  verdict, so they depend only on the message itself, other messages, and State facts
-  that can never change (an account's `type` and `cur` and an envelope's `cur` are
-  immutable, and accounts and envelopes are never deleted). A message that breaks a
-  fold-time rule is **ignored by the fold and surfaced** to the user as an anomaly. It is
-  never repaired. They are listed as *Fold-time*.
+- **Post-time checks** are run by the client before posting and may
+  depend on anything the client knows: the current chart, today's date,
+  the projection. They are listed as *Post-time*.
+- **Fold-time rules** decide whether a message counts. Every client must
+  reach the same verdict, so they depend only on the message itself,
+  other messages, and State facts that can never change (an account's
+  `type` and `cur` and an envelope's `cur` are immutable, and accounts
+  and envelopes are never deleted). A message that breaks a fold-time
+  rule is **ignored by the fold and surfaced** to the user as an
+  anomaly. It is never repaired. They are listed as *Fold-time*.
 
 The server can check neither kind, since it sees only ciphertext.
 
@@ -71,35 +79,41 @@ The server can check neither kind, since it sees only ciphertext.
 | `Label` | JSON string | A keyed PRF label ([LABELS.md](LABELS.md), 0005): base64url of 15 bytes, `^[A-Za-z0-9_-]{20}$`. |
 | `BlobRef` | JSON object | `{"blob": "B…", "dek": "…"}`. `blob` is a reeeductio blob ID, `^B[A-Za-z0-9_-]{43}$`. `dek` is the 32-byte AES-256 key from `encryptAndUploadBlob`, base64url with no padding (43 characters). |
 
-**Random and PRF identifiers are 15 bytes** (120 bits). The length is a multiple of 3
-bytes, so the base64url encoding is exactly 20 characters with no padding and no partial
-final character. Every ID has the same length, every 20-character string decodes, and
-each value has exactly one spelling. (At 16 bytes the last of 22 characters would carry
-only 2 bits, and a lenient decoder could accept several spellings of one ID.)
+**Random and PRF identifiers are 15 bytes** (120 bits). The length is a
+multiple of 3 bytes, so the base64url encoding is exactly 20 characters
+with no padding and no partial final character. Every ID has the same
+length, every 20-character string decodes, and each value has exactly
+one spelling. (At 16 bytes the last of 22 characters would carry only 2
+bits, and a lenient decoder could accept several spellings of one ID.)
 
-The length only has to defeat accidental collisions. Guessing a label is prevented by the
-HMAC key, not by its length, and no one gains by engineering a collision on a random ID:
-the server can't create IDs, and a member can already read the real ones. At 120 bits the
-birthday bound is negligible. Ten thousand random IDs collide with probability about
+The length only has to defeat accidental collisions. Guessing a label is
+prevented by the HMAC key, not by its length, and no one gains by
+engineering a collision on a random ID: the server can't create IDs, and
+a member can already read the real ones. At 120 bits the birthday bound
+is negligible. Ten thousand random IDs collide with probability about
 10⁻²⁸, and a million import labels about 10⁻²⁵.
 
-An **amount** is always three fields together: `amount` (`Int`), `exp` (`Exp`), and `cur`
-(`Commodity`). Amounts are strings so that no JSON parser ever turns one into a double.
-Amounts are compared by **value**, never by spelling: `"8400"` at exp 2 equals `"84"` at
-exp 0, and every "equals", "is zero", and "sums to zero" below means value equality. Two
-amounts in the same commodity with different exponents are compared and summed after
-scaling both to the larger exponent. Decoding, arithmetic, parsing, and the canonical
-decimal form are specified in [AMOUNTS.md](AMOUNTS.md) (0002).
+An **amount** is always three fields together: `amount` (`Int`), `exp`
+(`Exp`), and `cur` (`Commodity`). Amounts are strings so that no JSON
+parser ever turns one into a double. Amounts are compared by **value**,
+never by spelling: `"8400"` at exp 2 equals `"84"` at exp 0, and every
+"equals", "is zero", and "sums to zero" below means value equality. Two
+amounts in the same commodity with different exponents are compared and
+summed after scaling both to the larger exponent. Decoding, arithmetic,
+parsing, and the canonical decimal form are specified in
+[AMOUNTS.md](AMOUNTS.md) (0002).
 
-Where an amount is nested as its own object it is written `Amount`, meaning
-`{"amount": Int, "exp": Exp, "cur": Commodity}` with exactly those three fields.
+Where an amount is nested as its own object it is written `Amount`,
+meaning `{"amount": Int, "exp": Exp, "cur": Commodity}` with exactly
+those three fields.
 
 ### Routing
 
-Every message in a `journal-YYYY` segment that has a `date` must have a date in year
-`YYYY` (*Fold-time*). Messages with no date (`ledger.edit`, `ledger.dismiss`) follow the
-routing rule given for that type. A message posted to a segment after that segment's
-final close is ignored (see `ledger.checkpoint`).
+Every message in a `journal-YYYY` segment that has a `date` must have a
+date in year `YYYY` (*Fold-time*). Messages with no date (`ledger.edit`,
+`ledger.dismiss`) follow the routing rule given for that type. A message
+posted to a segment after that segment's final close is ignored (see
+`ledger.checkpoint`).
 
 ---
 
@@ -162,27 +176,29 @@ A **`LotDraw`**:
 Fold-time rules:
 
 - The splits sum to exactly zero **per commodity**.
-- Every `account` exists in the chart, and each split's `cur` equals its account's `cur`.
-  An account holds one commodity; a brokerage holds one account per position.
-- `cost` and `acquired` appear together, only on a split with positive `amount` to an
-  `asset` account.
-- `from_lots` appears only on a split with negative `amount` to an `asset` account. The
-  sum of its `qty` equals the split's quantity drawn (`-amount`). A split never has both
-  `cost` and `from_lots`.
-- The lot created by a split is `{this entry's hash}#{index}`. Since that hash isn't
-  known until the post succeeds, an entry never cites a lot it creates, and nothing names
-  a lot before its entry is committed.
+- Every `account` exists in the chart, and each split's `cur` equals its
+  account's `cur`. An account holds one commodity; a brokerage holds one
+  account per position.
+- `cost` and `acquired` appear together, only on a split with positive
+  `amount` to an `asset` account.
+- `from_lots` appears only on a split with negative `amount` to an
+  `asset` account. The sum of its `qty` equals the split's quantity
+  drawn (`-amount`). A split never has both `cost` and `from_lots`.
+- The lot created by a split is `{this entry's hash}#{index}`. Since
+  that hash isn't known until the post succeeds, an entry never cites a
+  lot it creates, and nothing names a lot before its entry is committed.
 - No two splits of an entry carry the same `import_id`.
 
-Lot problems (an unknown lot, an oversold lot, a `basis` that doesn't match the rounding
-policy) are anomalies in the lot fold, checked in the order given in
-[ROUNDING.md](ROUNDING.md#order-of-lot-events). They never change the validity of the
-entry or any balance, because the lot's creating entry may sit in a segment the reader
-doesn't hold.
+Lot problems (an unknown lot, an oversold lot, a `basis` that doesn't
+match the rounding policy) are anomalies in the lot fold, checked in the
+order given in [ROUNDING.md](ROUNDING.md#order-of-lot-events). They
+never change the validity of the entry or any balance, because the lot's
+creating entry may sit in a segment the reader doesn't hold.
 
-Post-time: no split posts to a closed account; `payee` exists in `ledger/payees`;
-no `import_id` is already consumed; the date's segment is open; `replaces`, if set, names
-an entry that has been reversed and that no other entry already replaces.
+Post-time: no split posts to a closed account; `payee` exists in
+`ledger/payees`; no `import_id` is already consumed; the date's segment
+is open; `replaces`, if set, names an entry that has been reversed and
+that no other entry already replaces.
 
 ### `ledger.reversal`
 
@@ -209,30 +225,37 @@ Cancels an earlier entry by posting its inverse.
 | `splits` | `Split[]` | yes | The inverse of the target's splits, in the same order, with the **effective** accounts (after edits). No `cost` or `from_lots`. |
 | `memo` | string | no | Non-empty. |
 
-The splits are written out rather than derived so that the reversal is readable from its
-own segment alone, which matters when it reverses an entry in a frozen year.
+The splits are written out rather than derived so that the reversal is
+readable from its own segment alone, which matters when it reverses an
+entry in a frozen year.
 
-**Date and routing.** The client defaults `date` to the target's date when the target is
-unlocked and its segment is open, so the reversal lands in the same segment and the same
-period and the register nets the pair to nothing. Otherwise it defaults to today, like an
-accountant's reversing entry in the open period. Either way the segment follows from the
-date.
+**Date and routing.** The client defaults `date` to the target's date
+when the target is unlocked and its segment is open, so the reversal
+lands in the same segment and the same period and the register nets the
+pair to nothing. Otherwise it defaults to today, like an accountant's
+reversing entry in the open period. Either way the segment follows from
+the date.
 
 Fold-time rules:
 
-- As for `ledger.entry`: splits sum to zero per commodity, accounts exist, `cur` matches.
-- A reversal always folds into balances as the balanced entry it is. The check that its
-  splits equal the inverse of the target's effective splits is an anomaly check, not a
-  validity rule, since the target may be in a segment the reader doesn't hold.
-- Lots: if the target created lots, those lots are void (no remaining quantity, no
-  basis). If the target drew from lots, those draws are void.
-- A target reversed more than once is an anomaly. Every reversal still folds.
+- As for `ledger.entry`: splits sum to zero per commodity, accounts
+  exist, `cur` matches.
+- A reversal always folds into balances as the balanced entry it is. The
+  check that its splits equal the inverse of the target's effective
+  splits is an anomaly check, not a validity rule, since the target may
+  be in a segment the reader doesn't hold.
+- Lots: if the target created lots, those lots are void (no remaining
+  quantity, no basis). If the target drew from lots, those draws are
+  void.
+- A target reversed more than once is an anomaly. Every reversal still
+  folds.
 
-Post-time: the target is a `ledger.entry` and is not already reversed; the splits are
-the inverse of its effective splits; the date's segment is open.
+Post-time: the target is a `ledger.entry` and is not already reversed;
+the splits are the inverse of its effective splits; the date's segment
+is open.
 
-There is no `ledger.replacement` type. A replacement is a `ledger.entry` with `replaces`
-set to the original entry's hash.
+There is no `ledger.replacement` type. A replacement is a `ledger.entry`
+with `replaces` set to the original entry's hash.
 
 ### `ledger.edit`
 
@@ -266,35 +289,42 @@ An **`Edit`** has a `target` and at least one other field:
 | `splits` | object | Maps a split index (decimal string, `"0"`, `"2"`) to a new `AccountId`. Only the named splits change. |
 | `import_ids` | object | Maps a split index to a `Label`, setting that split's `import_id`. This records an **import match**: a new row recognized as a split already in the journal (see "Import consumption and matching"). |
 
-**Semantics.** A field's effective value is what the latest valid edit naming it says, in
-chain order. For `splits` and `import_ids`, each index is its own field. Receipts are replaced, not
-appended, so the latest edit is the whole answer and removing a receipt needs no special
+**Semantics.** A field's effective value is what the latest valid edit
+naming it says, in chain order. For `splits` and `import_ids`, each
+index is its own field. Receipts are replaced, not appended, so the
+latest edit is the whole answer and removing a receipt needs no special
 case.
 
 Fold-time rules, applied **to each edit separately**:
 
-- The target is a `ledger.entry` earlier in this segment's chain. An edit naming a
-  target in another segment is ignored.
-- A split edit is valid only if the old and new accounts are both `income` or `expense`
-  accounts, and the new account's `cur` equals the split's `cur`. Here the old account is
-  the one effective just before this edit.
-- A split edit is invalid if the target is **locked**: some `ledger.checkpoint` cites a
-  head in this segment that is at or after the target and before this edit.
-- A split edit is invalid if the target has been reversed by a reversal earlier in this
-  segment's chain. (A reversal in a later segment can only exist once this segment is
-  frozen, and then no more edits can be posted.)
-- An `import_ids` edit is valid only if the split has no effective `import_id` yet. A
-  label, once set, is never replaced, so a consumed row can't become unconsumed.
-- `memo`, `payee`, `receipts`, and `import_ids` edits are valid on locked and reversed
-  entries, since none of them changes a balance.
+- The target is a `ledger.entry` earlier in this segment's chain. An
+  edit naming a target in another segment is ignored.
+- A split edit is valid only if the old and new accounts are both
+  `income` or `expense` accounts, and the new account's `cur` equals the
+  split's `cur`. Here the old account is the one effective just before
+  this edit.
+- A split edit is invalid if the target is **locked**: some
+  `ledger.checkpoint` cites a head in this segment that is at or after
+  the target and before this edit.
+- A split edit is invalid if the target has been reversed by a reversal
+  earlier in this segment's chain. (A reversal in a later segment can
+  only exist once this segment is frozen, and then no more edits can be
+  posted.)
+- An `import_ids` edit is valid only if the split has no effective
+  `import_id` yet. A label, once set, is never replaced, so a consumed
+  row can't become unconsumed.
+- `memo`, `payee`, `receipts`, and `import_ids` edits are valid on
+  locked and reversed entries, since none of them changes a balance.
 
-A malformed message (a bad shape or type) is rejected whole. An edit that fails a
-semantic rule is ignored on its own, and the rest of the message still applies. The
-client keeps each message under the server's 100 KB limit by splitting large batches.
+A malformed message (a bad shape or type) is rejected whole. An edit
+that fails a semantic rule is ignored on its own, and the rest of the
+message still applies. The client keeps each message under the server's
+100 KB limit by splitting large batches.
 
-Post-time: each edit passes the fold-time rules against its target's effective fields;
-the target is not reversed in any segment if the edit moves a split; no split moves to a
-closed account; `payee`, if set, exists in `ledger/payees`; the target's segment is open.
+Post-time: each edit passes the fold-time rules against its target's
+effective fields; the target is not reversed in any segment if the edit
+moves a split; no split moves to a closed account; `payee`, if set,
+exists in `ledger/payees`; the target's segment is open.
 
 ### `ledger.dismiss`
 
@@ -309,37 +339,41 @@ Marks import rows as handled without posting an entry.
 | `v` | `1` | yes | |
 | `import_ids` | `Label[]` | yes | Non-empty, no duplicates. |
 
-**Routing.** To the segment of the year of the import rows' dates. All `import_ids` in one
-message must share a year.
+**Routing.** To the segment of the year of the import rows' dates. All
+`import_ids` in one message must share a year.
 
-A dismissal is for rows that should be ignored, such as a pending charge that never
-posted, and for matches that can't be recorded as an edit because the matched split's
-segment is frozen.
+A dismissal is for rows that should be ignored, such as a pending charge
+that never posted, and for matches that can't be recorded as an edit
+because the matched split's segment is frozen.
 
 ### Import consumption and matching
 
-A row is **consumed** if and only if its label is the effective `import_id` of some split
-(set at posting or by an edit) or appears in a dismissal. A dismissal can't be undone,
-but it doesn't need to be: posting an entry that carries the same label is still valid.
+A row is **consumed** if and only if its label is the effective
+`import_id` of some split (set at posting or by an edit) or appears in a
+dismissal. A dismissal can't be undone, but it doesn't need to be:
+posting an entry that carries the same label is still valid.
 
-A split on an account that has an import profile is **confirmed** if it has an effective
-`import_id`, and **unconfirmed** otherwise. Unconfirmed splits are the candidates for
-matching. When the review step sees a new row, it looks in the same account for an
-unconfirmed split with the same amount and a nearby date. That one query covers both ways
-a row can already be in the journal:
+A split on an account that has an import profile is **confirmed** if it
+has an effective `import_id`, and **unconfirmed** otherwise. Unconfirmed
+splits are the candidates for matching. When the review step sees a new
+row, it looks in the same account for an unconfirmed split with the same
+amount and a nearby date. That one query covers both ways a row can
+already be in the journal:
 
-- the other side of a transfer, posted when the first account's file was imported, and
+- the other side of a transfer, posted when the first account's file was
+  imported, and
 - a transaction entered by hand before it showed up in an export.
 
-Accepting a match posts a `ledger.edit` setting the split's `import_id`, routed to the
-target's segment like any edit. That segment is open until its final close, so a
-December transfer that clears in January is still matched by an edit. If the segment is
-frozen, the row is dismissed instead. The heuristics (date window, whether descriptions
-count) live in the client, not the schema, so they can improve without changing anything
-already posted.
+Accepting a match posts a `ledger.edit` setting the split's `import_id`,
+routed to the target's segment like any edit. That segment is open until
+its final close, so a December transfer that clears in January is still
+matched by an edit. If the segment is frozen, the row is dismissed
+instead. The heuristics (date window, whether descriptions count) live
+in the client, not the schema, so they can improve without changing
+anything already posted.
 
-A label that becomes the `import_id` of two splits, or of a split and a dismissal, is an
-anomaly.
+A label that becomes the `import_id` of two splits, or of a split and a
+dismissal, is an anomaly.
 
 ### `ledger.lotadjust`
 
@@ -376,16 +410,17 @@ A **`LotAdjustment`**:
 
 Semantics:
 
-- The account's balance changes by `new_qty − old_qty`. This is exempt from sum-to-zero,
-  so the commodity's trading account keeps its pre-split quantity. That residual is
-  harmless and is not an anomaly.
-- The lot's remaining quantity becomes `new_qty`. Its basis and acquisition date don't
-  change.
-- Disposals citing the lot that are **dated on or after** `date` are in post-adjustment
-  units. Disposals dated before it are in pre-adjustment units. Ordering by date, not by
-  chain, keeps this well-defined across segments.
-- If `old_qty` doesn't match the lot's remaining quantity as folded at `date`, that's a
-  lot anomaly.
+- The account's balance changes by `new_qty − old_qty`. This is exempt
+  from sum-to-zero, so the commodity's trading account keeps its
+  pre-split quantity. That residual is harmless and is not an anomaly.
+- The lot's remaining quantity becomes `new_qty`. Its basis and
+  acquisition date don't change.
+- Disposals citing the lot that are **dated on or after** `date` are in
+  post-adjustment units. Disposals dated before it are in pre-adjustment
+  units. Ordering by date, not by chain, keeps this well-defined across
+  segments.
+- If `old_qty` doesn't match the lot's remaining quantity as folded at
+  `date`, that's a lot anomaly.
 
 ---
 
@@ -393,8 +428,9 @@ Semantics:
 
 ### `ledger.allocation` (topic `budget`)
 
-Assigns money to an envelope, or takes it away, changing To Be Budgeted. A move between
-envelopes is one `ledger.reallocation`, not two allocations.
+Assigns money to an envelope, or takes it away, changing To Be Budgeted.
+A move between envelopes is one `ledger.reallocation`, not two
+allocations.
 
 ```json
 {"v": 1, "date": "2025-12-01", "envelope": "env_Lm3vT8cHq2NbXr5kYwPd",
@@ -410,17 +446,17 @@ envelopes is one `ledger.reallocation`, not two allocations.
 | `idem` | `Label` | no | Present only on allocations materialized from the schedule: `label("allocation/v1", "{envelope}\|{YYYY-MM}")`. |
 | `memo` | string | no | Non-empty. |
 
-Fold-time rules: `envelope` exists and `cur` equals its `cur`. Allocations are exempt
-from sum-to-zero. If two allocations carry the same `idem`, only the first in the
-`budget` chain counts; the others are duplicates from a materialization race and are
-ignored.
+Fold-time rules: `envelope` exists and `cur` equals its `cur`.
+Allocations are exempt from sum-to-zero. If two allocations carry the
+same `idem`, only the first in the `budget` chain counts; the others are
+duplicates from a materialization race and are ignored.
 
 Post-time: the envelope is open.
 
 ### `ledger.reallocation` (topic `budget`)
 
-Moves money between envelopes in one message, so a move is never left half done. To Be
-Budgeted is unchanged.
+Moves money between envelopes in one message, so a move is never left
+half done. To Be Budgeted is unchanged.
 
 ```json
 {"v": 1, "date": "2026-10-14", "cur": "USD", "memo": "cover groceries overspend",
@@ -448,12 +484,14 @@ A **`Leg`**:
 
 Fold-time rules:
 
-- Every leg's `envelope` exists, and its `cur` equals the message's `cur`.
+- Every leg's `envelope` exists, and its `cur` equals the message's
+  `cur`.
 - The legs sum to exactly zero.
 
-A reallocation that breaks either rule is ignored whole; no leg counts. Each leg that
-counts adds to its envelope as an allocation would. A reallocation carries no `idem`,
-since only scheduled allocations are materialized.
+A reallocation that breaks either rule is ignored whole; no leg counts.
+Each leg that counts adds to its envelope as an allocation would. A
+reallocation carries no `idem`, since only scheduled allocations are
+materialized.
 
 Post-time: no leg names a closed envelope.
 
@@ -482,34 +520,37 @@ A completed statement reconciliation.
 | `statement` | `BlobRef` | no | The statement file. |
 | `supersedes` | `MsgId` | no | An earlier `ledger.recon` for the same account that this one replaces. The superseded message's `cleared` set no longer counts. This is how a mistaken reconciliation is fixed. |
 
-An entry is cleared **for an account** if and only if its hash is in the `cleared` set of
-some recon for that account that has not been superseded. Clearing applies to all of the
-entry's splits on that account.
+An entry is cleared **for an account** if and only if its hash is in the
+`cleared` set of some recon for that account that has not been
+superseded. Clearing applies to all of the entry's splits on that
+account.
 
 Fold-time rules:
 
-- `account` exists and is an `asset` or `liability` account, and `closing_balance.cur`
-  equals its `cur`.
-- `supersedes`, when present, names an earlier recon in the chain that counts, for the
-  same `account`.
+- `account` exists and is an `asset` or `liability` account, and
+  `closing_balance.cur` equals its `cur`.
+- `supersedes`, when present, names an earlier recon in the chain that
+  counts, for the same `account`.
 
-A recon that breaks a rule is ignored and doesn't supersede anything. Whether a `cleared`
-hash names a transaction on the account is not a fold-time rule, since the journal may
-not be synced yet: a hash that names none clears nothing. Two recons that are not
-superseded and clear the same transaction for the same account both count, and the later
-one is surfaced as `cleared-twice` (two devices reconciling at once).
+A recon that breaks a rule is ignored and doesn't supersede anything.
+Whether a `cleared` hash names a transaction on the account is not a
+fold-time rule, since the journal may not be synced yet: a hash that
+names none clears nothing. Two recons that are not superseded and clear
+the same transaction for the same account both count, and the later one
+is surfaced as `cleared-twice` (two devices reconciling at once).
 
-Post-time: every `cleared` hash is an entry or reversal with a split on the account, and
-none is already cleared by a recon that will still stand; `supersedes` names a recon that
-has not been superseded; `statement_date` is after the latest recon of the account that
-will still stand; and the account's cleared balance, the sum of the splits on it in every
-transaction cleared by a recon that will still stand, this one included, equals
-`closing_balance`.
+Post-time: every `cleared` hash is an entry or reversal with a split on
+the account, and none is already cleared by a recon that will still
+stand; `supersedes` names a recon that has not been superseded;
+`statement_date` is after the latest recon of the account that will
+still stand; and the account's cleared balance, the sum of the splits on
+it in every transaction cleared by a recon that will still stand, this
+one included, equals `closing_balance`.
 
 ### `ledger.checkpoint` (topic `checkpoints`)
 
-One type covers both a **period close** (heads only) and a **full checkpoint** (heads
-plus balances).
+One type covers both a **period close** (heads only) and a **full
+checkpoint** (heads plus balances).
 
 ```json
 {
@@ -533,32 +574,37 @@ plus balances).
 | `lots` | `OpenLot[]` | no | Full checkpoint: every lot with remaining quantity. |
 | `prices` | `Price[]` | no | Full checkpoint: the prices used for any valuation. |
 
-A **`Head`** is `{"topic": string, "hash": MsgId, "final"?: true}`. `topic` is a journal
-segment (`journal-YYYY`) or `budget`. `final` may appear only on a journal segment.
+A **`Head`** is `{"topic": string, "hash": MsgId, "final"?: true}`.
+`topic` is a journal segment (`journal-YYYY`) or `budget`. `final` may
+appear only on a journal segment.
 
-**What a close cites.** A close cites only the segments it means to lock, at their heads
-when it is posted. Closing December 2025 in January cites `journal-2025` alone, which
-leaves January's 2026 entries unlocked. A **full checkpoint** cites every journal segment
-that exists, including frozen ones, plus `budget`, since its balances fold over all of
-them. `balances`, `envelopes`, `lots`, and `prices` appear only on a full checkpoint, and
-`balances` is required on one.
+**What a close cites.** A close cites only the segments it means to
+lock, at their heads when it is posted. Closing December 2025 in January
+cites `journal-2025` alone, which leaves January's 2026 entries
+unlocked. A **full checkpoint** cites every journal segment that exists,
+including frozen ones, plus `budget`, since its balances fold over all
+of them. `balances`, `envelopes`, `lots`, and `prices` appear only on a
+full checkpoint, and `balances` is required on one.
 
 Semantics:
 
-- **Lock.** An entry in segment `S` is locked if some checkpoint cites a head in `S` at or
-  after the entry. Locking forbids split-account edits (see `ledger.edit`).
-- **Freeze.** `final: true` freezes the segment. Any message in that segment after the
-  cited head is ignored by the fold and surfaced. The client refuses to post to a frozen
-  segment.
-- A checkpoint is a claim about a fold. Who may sign one, and how a reader verifies it,
-  is the checkpoint trust model (an open question in ACCOUNTING.md). A client holding the
-  full history recomputes the claim and reports any mismatch.
+- **Lock.** An entry in segment `S` is locked if some checkpoint cites a
+  head in `S` at or after the entry. Locking forbids split-account edits
+  (see `ledger.edit`).
+- **Freeze.** `final: true` freezes the segment. Any message in that
+  segment after the cited head is ignored by the fold and surfaced. The
+  client refuses to post to a frozen segment.
+- A checkpoint is a claim about a fold. Who may sign one, and how a
+  reader verifies it, is the checkpoint trust model (an open question in
+  ACCOUNTING.md). A client holding the full history recomputes the claim
+  and reports any mismatch.
 
-Post-time, for a period close: no `balances`, `envelopes`, `lots`, or `prices`; every head
-is a journal segment that is listed in `ledger/journal`, is still open, and is no later
-than the year of `period`; and a head with `final` belongs to a close whose `period` is
-that segment's whole year (`YYYY`). The client cites each segment's head as the server
-reports it when posting.
+Post-time, for a period close: no `balances`, `envelopes`, `lots`, or
+`prices`; every head is a journal segment that is listed in
+`ledger/journal`, is still open, and is no later than the year of
+`period`; and a head with `final` belongs to a close whose `period` is
+that segment's whole year (`YYYY`). The client cites each segment's head
+as the server reports it when posting.
 
 | Type | Fields |
 |---|---|
@@ -571,10 +617,10 @@ reports it when posting.
 
 ## State documents
 
-Each document is one State path, read with one point read and rewritten whole. All of
-them carry `v` and `rev`. `rev` starts at 1 and goes up by one on every write. The
-reeeductio state chain provides CAS; `rev` is there so a person reading history can tell
-revisions apart.
+Each document is one State path, read with one point read and rewritten
+whole. All of them carry `v` and `rev`. `rev` starts at 1 and goes up by
+one on every write. The reeeductio state chain provides CAS; `rev` is
+there so a person reading history can tell revisions apart.
 
 ### `ledger/accounts`
 
@@ -605,18 +651,22 @@ An **`Account`**:
 | `parent` | `AccountId` or `null` | yes | Must have the same `type`. No cycles. |
 | `closed_at` | `Date` | no | Closed accounts stay in the chart forever. |
 
-The chart holds no budgeting fields. Envelopes, which expense accounts spend from them,
-and which accounts are budgetable are all in `ledger/budget`.
+The chart holds no budgeting fields. Envelopes, which expense accounts
+spend from them, and which accounts are budgetable are all in
+`ledger/budget`.
 
 Rules:
 
-- Accounts are never removed from the document; they are closed. An ID is never reused.
-- `type` and `cur` never change once written, because fold-time rules depend on them.
+- Accounts are never removed from the document; they are closed. An ID
+  is never reused.
+- `type` and `cur` never change once written, because fold-time rules
+  depend on them.
 
 ### `ledger/journal`
 
-The years that have a `journal-YYYY` segment. The server has no route that lists topics,
-and an entry may be dated in any year, so this is how a client finds every segment (0011).
+The years that have a `journal-YYYY` segment. The server has no route
+that lists topics, and an entry may be dated in any year, so this is how
+a client finds every segment (0011).
 
 ```json
 {
@@ -632,23 +682,25 @@ and an entry may be dated in any year, so this is how a client finds every segme
 
 Rules:
 
-- **A year is listed before anything is posted to its segment.** A client adds the year,
-  then posts. If the post fails, the year is listed with an empty or missing segment,
-  which reads as no messages. Posting first could leave a segment that no client knows
-  to read.
+- **A year is listed before anything is posted to its segment.** A
+  client adds the year, then posts. If the post fails, the year is
+  listed with an empty or missing segment, which reads as no messages.
+  Posting first could leave a segment that no client knows to read.
 - Years are never removed, even from a segment that turned out empty.
 
-A segment posted by a client that skipped the first rule is invisible to every other
-client, so the rule is not optional. The list leaks nothing new, since topic IDs are
-already cleartext to the server. It is written about once per year, so its write volume
-doesn't scale with transaction count.
+A segment posted by a client that skipped the first rule is invisible to
+every other client, so the rule is not optional. The list leaks nothing
+new, since topic IDs are already cleartext to the server. It is written
+about once per year, so its write volume doesn't scale with transaction
+count.
 
 ### `ledger/budget`
 
-Everything about envelope budgeting that is configuration rather than history: the
-envelopes, which expense accounts spend from each, which accounts count toward To Be
-Budgeted, and the monthly schedule the client materializes allocations from. Allocations
-themselves are events on the `budget` topic.
+Everything about envelope budgeting that is configuration rather than
+history: the envelopes, which expense accounts spend from each, which
+accounts count toward To Be Budgeted, and the monthly schedule the
+client materializes allocations from. Allocations themselves are events
+on the `budget` topic.
 
 ```json
 {
@@ -688,38 +740,47 @@ An **`Envelope`**:
 | `closed_at` | `Date` | no | Closed envelopes stay in the document forever. |
 | `schedule` | `Step[]` | no | Non-empty, sorted by `from` with no repeats. |
 
-A **`Step`** is `{"from": Month, "amount": Int, "exp": Exp}`, in the envelope's `cur`. It
-sets the monthly allocation from that month until the next step. `amount` may be `"0"` to
-stop allocating.
+A **`Step`** is `{"from": Month, "amount": Int, "exp": Exp}`, in the
+envelope's `cur`. It sets the monthly allocation from that month until
+the next step. `amount` may be `"0"` to stop allocating.
 
 Rules:
 
-- Envelopes are never removed; they are closed. An ID is never reused. `cur` never
-  changes once written, because fold-time rules depend on it.
-- **`spent_from` points from the expense to the envelope.** That makes it a function:
-  each expense account is spent from at most one envelope, while one envelope may fund
-  several expense accounts (above, Groceries funds two). Pointing the other way would let
-  two envelopes claim the same expense, and its spending would count twice. An expense
+- Envelopes are never removed; they are closed. An ID is never reused.
+  `cur` never changes once written, because fold-time rules depend on
+  it.
+- **`spent_from` points from the expense to the envelope.** That makes
+  it a function: each expense account is spent from at most one
+  envelope, while one envelope may fund several expense accounts (above,
+  Groceries funds two). Pointing the other way would let two envelopes
+  claim the same expense, and its spending would count twice. An expense
   account with no entry is spent from no envelope.
-- **`budgetable` may include liabilities**, so credit cards can be budgeted. Otherwise a
-  card purchase would lower an envelope without lowering any budgetable asset, and To
-  Be Budgeted would go up. With the card counted, `To Be Budgeted = Σ budgetable asset and
-  liability balances − Σ envelope balances`, and spending on the card leaves it unchanged.
+- **`budgetable` may include liabilities**, so credit cards can be
+  budgeted. Otherwise a card purchase would lower an envelope without
+  lowering any budgetable asset, and To Be Budgeted would go up. With
+  the card counted,
 
-The document refers to accounts in `ledger/accounts`, which is written separately.
-Accounts are never removed and their `type` and `cur` never change, so a reference that
-was valid when written stays valid.
+  ```text
+  To Be Budgeted = Σ budgetable asset and liability balances − Σ envelope balances
+  ```
+
+  and spending on the card leaves it unchanged.
+
+The document refers to accounts in `ledger/accounts`, which is written
+separately. Accounts are never removed and their `type` and `cur` never
+change, so a reference that was valid when written stays valid.
 
 Post-time, checked against the current chart:
 
-- Each `spent_from` key is an `expense` account, and its envelope exists, is open, and has
-  the same `cur`.
+- Each `spent_from` key is an `expense` account, and its envelope
+  exists, is open, and has the same `cur`.
 - Each `budgetable` account is an `asset` or `liability` account.
 - No envelope is removed, and no envelope's `cur` changes.
 
-Fold-time: a `spent_from` pairing whose account is not an expense account, or whose
-envelope is missing or in another commodity, is ignored and surfaced, as is a
-`budgetable` entry that is not an asset or liability account.
+Fold-time: a `spent_from` pairing whose account is not an expense
+account, or whose envelope is missing or in another commodity, is
+ignored and surfaced, as is a `budgetable` entry that is not an asset or
+liability account.
 
 ### `ledger/payees`
 
@@ -741,13 +802,15 @@ envelope is missing or in another commodity, is ignored and surfaced, as is a
 
 Payees are never removed, since entries cite them forever.
 
-A client matches a typed name against `name` after the `import/v1` normalization
-([NORMALIZATION.md](NORMALIZATION.md)), resolving a merged payee to its target, and adds
-a payee only when no name matches. Two devices adding the same name at once can still
-leave two payees with it; that is fixed by merging, and until then the match picks a
-payee not merged away over a merged one, then the lowest ID.
+A client matches a typed name against `name` after the `import/v1`
+normalization ([NORMALIZATION.md](NORMALIZATION.md)), resolving a merged
+payee to its target, and adds a payee only when no name matches. Two
+devices adding the same name at once can still leave two payees with it;
+that is fixed by merging, and until then the match picks a payee not
+merged away over a merged one, then the lowest ID.
 
-Post-time: `rev` goes up by one, no payee is removed, and no merge chains.
+Post-time: `rev` goes up by one, no payee is removed, and no merge
+chains.
 
 ### `ledger/rules`
 
@@ -814,5 +877,5 @@ A **`Profile`**:
 | `pending` | `{column, value}` | no | Rows whose `column` equals `value` are skipped as pending. |
 | `exp` | `Exp` | yes | Exponent the file's amounts are parsed at. A cell with more non-zero fractional digits is an error, never rounded. The commodity is the account's `cur`. |
 
-A `column` is a header name (string) when `header` is true, and a 0-based index (number)
-otherwise.
+A `column` is a header name (string) when `header` is true, and a
+0-based index (number) otherwise.

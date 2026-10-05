@@ -1,0 +1,13 @@
+{
+  // Only line length is enforced: prose wraps at 72 columns.
+  "config": {
+    "default": false,
+    "MD013": {
+      "line_length": 72,
+      "code_blocks": false,
+      "tables": false
+    }
+  },
+  "globs": ["**/*.md"],
+  "ignores": ["node_modules", "dist"]
+}
