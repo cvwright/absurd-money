@@ -245,6 +245,14 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   SCHEMAS.md defines every row's outcome: pending, blank, and zero rows
   are skipped and reported, a blank `fitid` is flagged for manual entry,
   and a bad date or amount fails the import.
+- Import rules in `ledger/rules` (0021). A rule may compare the memo
+  column instead of the description (`field`) and match only money in
+  or out (`sign`). The payee and the category are each taken from the
+  first matching rule that sets a usable one, passing over a closed or
+  unknown account, one in another commodity, or an unknown payee.
+  `src/core/rules.ts` matches, chooses, and edits rules and checks a
+  rewrite. `LedgerSpace` loads and rewrites the document, checking new
+  or changed rules against the chart and payees.
 
 ### Changed
 

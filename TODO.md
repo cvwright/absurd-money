@@ -4,7 +4,7 @@ Open issues, grouped by milestone, in priority order. An issue is open
 if and only if it is listed here. See
 [issues/README.md](issues/README.md) for the workflow.
 
-Next ID: 0046
+Next ID: 0047
 
 ## Milestone 1: Core ledger
 
@@ -16,7 +16,6 @@ Next ID: 0046
 
 ## Milestone 3: CSV import
 
-- [ ] 0021 Categorization rules stored in State
 - [ ] 0022 Staging review, matching against existing entries, and
       approval
 - [ ] [0023](issues/0023-import-idempotency.md) Idempotency via
@@ -47,6 +46,8 @@ Next ID: 0046
 - [ ] 0041 Decrypt sync messages in the projection worker, not on the UI
       thread
 - [ ] 0029 OFX/QFX import
+- [ ] [0046](issues/0046-regex-rules.md) Richer patterns in import
+      rules (regex or ordered fragments), as `ledger/rules` v2
 - [ ] 0030 Bank sync as a tool account (SimpleFIN or Plaid). Maybe
       never.
 - [ ] [0034](issues/0034-non-extractable-keys.md) Non-extractable

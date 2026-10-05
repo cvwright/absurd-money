@@ -417,10 +417,17 @@ export interface PayeesDoc {
   readonly payees: Readonly<Record<PayeeId, Payee>>;
 }
 
+export const RULE_OPS = ['contains', 'prefix', 'equals'] as const;
+export type RuleOp = (typeof RULE_OPS)[number];
+
 export interface Rule {
   readonly id: RuleId;
-  readonly op: 'contains' | 'prefix' | 'equals';
+  readonly op: RuleOp;
   readonly pattern: string;
+  /** The text `pattern` is compared against. Absent means `description`. */
+  readonly field?: 'description' | 'memo';
+  /** Matches only rows whose amount, as posted to the account, has this sign. */
+  readonly sign?: 'positive' | 'negative';
   readonly scope?: AccountId;
   readonly payee?: PayeeId;
   readonly account?: AccountId;
@@ -541,12 +548,18 @@ const rule: Decoder<Rule> = refine(
   object(
     {
       id: ruleId,
-      op: oneOf(['contains', 'prefix', 'equals'] as const),
+      op: oneOf(RULE_OPS),
       pattern: refine(nonEmptyString, (p) =>
         normalizeDescription(p) === p ? undefined : 'pattern must be stored normalized',
       ),
     },
-    { scope: accountId, payee: payeeId, account: accountId },
+    {
+      field: oneOf(['description', 'memo'] as const),
+      sign: oneOf(['positive', 'negative'] as const),
+      scope: accountId,
+      payee: payeeId,
+      account: accountId,
+    },
   ),
   (r) => (r.payee || r.account ? undefined : 'a rule sets at least one of "payee" and "account"'),
 );

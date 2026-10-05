@@ -814,7 +814,8 @@ chains.
 
 ### `ledger/rules`
 
-Import rules, read in bulk at review time.
+Import rules, read in bulk at review time. Issue
+[0021](../issues/0021-categorization-rules.md).
 
 ```json
 {
@@ -822,23 +823,55 @@ Import rules, read in bulk at review time.
   "rev": 3,
   "rules": [
     {"id": "rule_…", "op": "contains", "pattern": "blue bottle",
-     "payee": "payee_kR3nQ8vZ1mH7bWxT2yLp", "account": "acct_…"}
+     "payee": "payee_kR3nQ8vZ1mH7bWxT2yLp", "account": "acct_…"},
+    {"id": "rule_…", "op": "prefix", "pattern": "zelle from", "sign": "positive",
+     "scope": "acct_7bQ2xV9mKd4TnR1sYgLp", "account": "acct_…"}
   ]
 }
 ```
 
-`rules` is an ordered list; the **first** match wins. A **`Rule`**:
+`rules` is an ordered list. A **`Rule`**:
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `id` | `RuleId` | yes | Unique within the document. |
 | `op` | string | yes | `contains`, `prefix`, or `equals`. |
-| `pattern` | string | yes | Non-empty. Compared against the row's description after `import/v1` normalization ([NORMALIZATION.md](NORMALIZATION.md)), and is itself stored normalized. |
+| `pattern` | string | yes | Non-empty. Compared against `field` after `import/v1` normalization ([NORMALIZATION.md](NORMALIZATION.md)), and is itself stored normalized. |
+| `field` | string | no | `"description"` (the default when absent) or `"memo"`: the profile column the pattern is compared against. A row with no memo matches no `memo` rule. |
+| `sign` | string | no | `"positive"` or `"negative"`: matches only rows whose amount, as posted to the account, has that sign. Negative is money out of an asset or a charge on a liability. |
 | `scope` | `AccountId` | no | Applies only to rows imported into this account. |
 | `payee` | `PayeeId` | no | |
 | `account` | `AccountId` | no | The category for the other side of the entry. |
 
 A rule must set at least one of `payee` and `account`.
+
+Rules only suggest. They choose a payee and a category for each row in
+review, and nothing is posted until the user approves. Every client must
+choose the same way:
+
+- A rule **matches** a row when its `scope` (if any) is the account
+  being imported into, its `sign` (if any) is the amount's, and its
+  `op` holds between the normalized `field` text and `pattern`.
+- **The payee and the category are chosen separately.** Each comes from
+  the first matching rule, in order, that sets a usable one. A rule that
+  sets only a payee doesn't stop a later rule from choosing the
+  category.
+- A `payee` is usable if it exists, and resolves through its merge. An
+  `account` is usable if it exists, is open, holds the same commodity as
+  the account being imported into, and is not that account. A rule whose
+  reference isn't usable is passed over for that field, not for the
+  other.
+
+Post-time, checked against the current chart and payee list, for each
+rule that is new or changed (an unchanged rule isn't checked again, so
+closing its account doesn't block later writes):
+
+- `scope` is an `asset` or `liability` account.
+- `account` exists and is open, is not `scope`, and has `scope`'s `cur`.
+- `payee` exists and is not merged away.
+
+`rev` goes up by one. Rules may be removed and reordered, since nothing
+cites a `RuleId`.
 
 ### `ledger/import-profiles`
 

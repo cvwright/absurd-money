@@ -197,6 +197,13 @@ describe('State documents', () => {
     expect(() => decodeState('ledger/rules', { v: 1, rev: 1, rules: [{ ...rule, pattern: 'Blue Bottle' }] })).toThrow(CodecError);
     const { account: _, ...bare } = rule;
     expect(() => decodeState('ledger/rules', { v: 1, rev: 1, rules: [bare] })).toThrow(CodecError);
+    const full = { ...rule, field: 'memo', sign: 'negative', scope: A.checking };
+    expect(decodeState('ledger/rules', { v: 1, rev: 1, rules: [full] }).rules[0]).toEqual(full);
+    for (const bad of [{ field: 'payee' }, { sign: 'debit' }, { op: 'regex' }, { pattern: '' }]) {
+      expect(() => decodeState('ledger/rules', { v: 1, rev: 1, rules: [{ ...rule, ...bad }] }), JSON.stringify(bad)).toThrow(
+        CodecError,
+      );
+    }
   });
   it('import profiles: columns follow header', () => {
     const profile = {

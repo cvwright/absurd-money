@@ -4,7 +4,7 @@
  * One set of books is one reeeductio space. This wraps the SDK's `Space` with the
  * ledger's operations. For now that is authentication, the chart of accounts
  * (`ledger/accounts`), the owner's password (0033), the budget document (`ledger/budget`), the list of journal years
- * (`ledger/journal`), the payee list (`ledger/payees`), posting entries, reversals, and edits to the journal, period
+ * (`ledger/journal`), the payee list (`ledger/payees`), the import rules (`ledger/rules`), posting entries, reversals, and edits to the journal, period
  * closes to `checkpoints`, statement reconciliations to `recon`, receipts as
  * encrypted blobs, reading a journal segment, and fetching and decrypting messages for the
  * sync (sync.ts); the other State documents come in later issues. A post that loses the
@@ -24,10 +24,11 @@ import { EMPTY_JOURNAL, journalUpdateProblems, withYear } from '@/core/journal.j
 import { parseJsonBytes } from '@/core/json.js';
 import {
   encodeMessage, isStatePath, TOPIC_TYPES, type AccountsDoc, type BudgetDoc, type Edit, type Entry,
-  type MessageTypes, type PayeesDoc, type Recon, type Reversal,
+  type MessageTypes, type PayeesDoc, type Recon, type Reversal, type RulesDoc,
 } from '@/core/messages.js';
 import { cleanPayeeName, EMPTY_PAYEES, findPayee, payeesUpdateProblems, withPayee } from '@/core/payees.js';
 import { reconPostProblems, type ReconPostContext } from '@/core/recon.js';
+import { EMPTY_RULES, rulesUpdateProblems } from '@/core/rules.js';
 import { reversalPostProblems, type ReversalTarget } from '@/core/reversal.js';
 import { entryPostProblems } from '@/core/validate.js';
 import type { LogMessage } from '@/projection/projection.js';
@@ -75,6 +76,19 @@ export function budgetSpec(chart: Chart): DocSpec<'ledger/budget'> {
     path: 'ledger/budget',
     empty: EMPTY_BUDGET,
     problems: (prev, next) => budgetUpdateProblems(prev, next, chart),
+  };
+}
+
+/**
+ * The rule list's spec, checked against `chart` and `payees`. Like `budgetSpec`, a stale
+ * chart or payee list can only reject a reference to something brand new, since neither
+ * ever loses an entry.
+ */
+export function rulesSpec(chart: Chart, payees: PayeesDoc): DocSpec<'ledger/rules'> {
+  return {
+    path: 'ledger/rules',
+    empty: EMPTY_RULES,
+    problems: (prev, next) => rulesUpdateProblems(prev, next, { chart, payees }),
   };
 }
 
@@ -188,6 +202,22 @@ export class LedgerSpace {
     const fresh = newPayeeId(crypto.getRandomValues(new Uint8Array(15)));
     const doc = await updateDoc(this.state, PAYEES, (d) => (findPayee(d, clean) ? d : withPayee(d, fresh, clean)));
     return findPayee(doc, clean)!;
+  }
+
+  /** The import rules. A space whose rules were never written has an empty list. */
+  loadRules(): Promise<RulesDoc> {
+    // Loading never checks the update rules, so no chart or payees are needed.
+    return loadDoc(this.state, rulesSpec(new Map(), EMPTY_PAYEES));
+  }
+
+  /**
+   * Rewrites the rule list as `edit` of the current one, checked against the post-time
+   * rules, the latest chart, and the latest payee list. `edit` is re-run on a fresh list
+   * if another write wins the race. Returns the list written.
+   */
+  async updateRules(edit: (doc: RulesDoc) => RulesDoc): Promise<RulesDoc> {
+    const [accounts, payees] = await Promise.all([this.loadAccounts(), this.loadPayees()]);
+    return updateDoc(this.state, rulesSpec(chartOf(accounts), payees), edit);
   }
 
   /** The years that have a `journal-YYYY` segment, ascending. */
