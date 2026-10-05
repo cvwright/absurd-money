@@ -372,6 +372,57 @@ describe('Projection', () => {
     expect(p.allocated().get(E.groceries)).toEqual({ amount: 120000n, exp: 2, cur: USD });
   });
 
+  it('derives cleared status from standing reconciliations', () => {
+    const p = Projection.open(memoryDb());
+    const s = chain(1);
+    p.append('state', stateWith(s));
+    const j = chain();
+    const pay = j('pay', 'ledger.entry', entry('2026-09-01', [usd(A.checking, 100000), usd(A.salary, -100000)]));
+    const food = j('food', 'ledger.entry', entry('2026-09-14', [usd(A.checking, -8423), usd(A.checking, -100), usd(A.groceries, 8523)]));
+    const undo = j('undo', 'ledger.reversal', {
+      v: 1, date: '2026-09-15', reverses: food.hash,
+      splits: [usd(A.checking, 8423), usd(A.checking, 100), usd(A.groceries, -8523)],
+    });
+    p.append('journal-2026', [pay, food, undo]);
+
+    const recon = (date: string, balance: number, cleared: string[], extra: object = {}) => ({
+      v: 1, account: A.checking, statement_date: date,
+      closing_balance: { amount: String(balance), exp: 2, cur: 'USD' }, cleared, ...extra,
+    });
+    const r = chain();
+    const sep = r('sep', 'ledger.recon', recon('2026-09-30', 91477, [pay.hash, food.hash]));
+    const redo = r('redo', 'ledger.recon', recon('2026-09-30', 100000, [pay.hash, food.hash, undo.hash], { supersedes: sep.hash }));
+    const twice = r('twice', 'ledger.recon', recon('2026-10-31', 100000, [pay.hash]));
+    p.append('recon', [sep]);
+
+    expect(p.reconcilable(A.checking)).toEqual(new Map([
+      [pay.hash, { amount: 100000n, exp: 2, cur: USD }],
+      [food.hash, { amount: -8523n, exp: 2, cur: USD }],
+      [undo.hash, { amount: 8523n, exp: 2, cur: USD }],
+    ]));
+    // Every split on the account is cleared, and no other account's.
+    const reconciled = () => p.register(A.checking).map((l) => [l.txn, l.split, l.reconciled]);
+    expect(reconciled()).toEqual([
+      [pay.hash, 0, sep.hash], [food.hash, 0, sep.hash], [food.hash, 1, sep.hash], [undo.hash, 0, undefined], [undo.hash, 1, undefined],
+    ]);
+    expect(p.register(A.groceries).every((l) => l.reconciled === undefined)).toBe(true);
+
+    p.append('recon', [redo, twice]);
+    expect(reconciled().map((x) => x[2])).toEqual([redo.hash, redo.hash, redo.hash, redo.hash, redo.hash]);
+    expect(p.reconciliations(A.checking)).toEqual([
+      expect.objectContaining({ id: sep.hash, statementDate: '2026-09-30', held: 2, supersededBy: redo.hash }),
+      expect.objectContaining({ id: redo.hash, supersedes: sep.hash, held: 3, closingBalance: { amount: 100000n, exp: 2, cur: USD } }),
+      expect.objectContaining({ id: twice.hash, cleared: [pay.hash] }),
+    ]);
+    expect(p.reconciliations(A.visa)).toEqual([]);
+    expect(p.anomalies()).toMatchObject([{ topic: 'recon', kind: 'cleared-twice', msg: twice.hash }]);
+
+    // Chart facts decide whether a recon counts, so a chart change refolds the topic.
+    const chart = JSON.parse(encodeState('ledger/accounts', accountsDoc));
+    p.append('state', [s('s-acct2', 'ledger/accounts', { ...chart, rev: 2 })]);
+    expect(p.reconciliations(A.checking)).toHaveLength(3);
+  });
+
   it('keeps the previous revision of a State document that does not decode', () => {
     const p = Projection.open(memoryDb());
     const s = chain(1);

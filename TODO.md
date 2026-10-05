@@ -13,7 +13,6 @@ Next ID: 0045
 
 ## Milestone 2: Reconciliation
 
-- [ ] 0018 Statement reconciliation posted as `recon` events
 - [ ] 0019 In-progress reconciliation session kept in local storage
 
 ## Milestone 3: CSV import

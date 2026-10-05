@@ -37,13 +37,14 @@ import {
   type Split, type StateDocs, type StatePath,
 } from '@/core/messages.js';
 import type { EditTarget } from '@/core/edit.js';
+import { foldRecon, type ReconSummary } from '@/core/recon.js';
 import { isInverse, type ReversalTarget } from '@/core/reversal.js';
 
 /** The log's schema. Changing it means downloading every topic again. */
 export const LOG_VERSION = 1;
 
 /** The fold tables' schema and meaning. Changing it means refolding from the log. */
-export const PROJECTION_VERSION = 3;
+export const PROJECTION_VERSION = 4;
 
 /** The topics the projection replays, besides the `journal-YYYY` segments. */
 export const FIXED_TOPICS = ['state', 'checkpoints', 'budget', 'recon'] as const;
@@ -110,6 +111,15 @@ export interface Opening {
   readonly date: IsoDate;
 }
 
+/** A `ledger.recon` that counts, as the reconcile view shows it. */
+export interface Reconciliation extends ReconSummary {
+  readonly account: AccountId;
+  readonly closingBalance: Amount;
+  readonly supersedes?: MsgId;
+  /** How many of `cleared` are transactions on the account that the projection holds. */
+  readonly held: number;
+}
+
 export type TxnKind = 'entry' | 'reversal' | 'lotadjust';
 
 /** One split of one transaction, as an account's register shows it. */
@@ -141,6 +151,8 @@ export interface RegisterLine {
   readonly replaces?: MsgId;
   /** For an entry: the first entry that replaces it, in any segment. */
   readonly replacedBy?: MsgId;
+  /** The standing reconciliation that clears this transaction for the account, if any. */
+  readonly reconciled?: MsgId;
   /**
    * An entry and its first reversal, dated the same day, shown as one line in the
    * reversal's place. `amount` is their net for this account, and `txn` is the entry.
@@ -235,6 +247,25 @@ const FOLD_SCHEMA = `
     amount TEXT NOT NULL,
     exp INTEGER NOT NULL,
     cur TEXT NOT NULL
+  ) STRICT;
+  CREATE TABLE recons (
+    pos INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    account TEXT NOT NULL,
+    date TEXT NOT NULL,
+    amount TEXT NOT NULL,
+    exp INTEGER NOT NULL,
+    cur TEXT NOT NULL,
+    cleared TEXT NOT NULL,
+    supersedes TEXT,
+    superseded_by TEXT
+  ) STRICT;
+  CREATE INDEX recons_account ON recons (account);
+  CREATE TABLE cleared (
+    account TEXT NOT NULL,
+    txn TEXT NOT NULL,
+    recon TEXT NOT NULL,
+    PRIMARY KEY (account, txn)
   ) STRICT;
   CREATE TABLE anomalies (
     topic TEXT NOT NULL,
@@ -381,23 +412,28 @@ export class Projection {
       const paths = new Set(appended.map((m) => m.type));
       if (![...paths].some(isStatePath)) return;
       this.refoldState();
-      if (paths.has('ledger/accounts')) this.refoldSegments();
+      if (paths.has('ledger/accounts')) {
+        this.refoldSegments();
+        this.refoldRecon();
+      }
       if (paths.has('ledger/budget')) this.refoldBudget();
     } else if (topic === 'checkpoints') {
       this.refoldCheckpoints();
       this.refoldSegments();
     } else if (topic === 'budget') {
       this.refoldBudget();
+    } else if (topic === 'recon') {
+      this.refoldRecon();
     } else if (segmentYear(topic) !== undefined) {
       this.refoldSegment(topic, touchedBy(appended));
     }
-    // `recon` has no fold yet (0018); its messages are only logged.
   }
 
   private refoldAll(): void {
     this.refoldState();
     this.refoldCheckpoints();
     this.refoldBudget();
+    this.refoldRecon();
     this.refoldSegments();
   }
 
@@ -500,6 +536,35 @@ export class Projection {
       [...fold.allocated].map(([env, a]) => [env, String(a.amount), a.exp, a.cur]),
     );
     this.recordFold('budget', fold.anomalies, fold.halted);
+  }
+
+  /**
+   * The recons that count, and what the standing ones clear. A transaction cleared twice
+   * for one account (an anomaly) is kept with the first recon that clears it.
+   */
+  private refoldRecon(): void {
+    this.clearTopic('recon');
+    this.db.exec('DELETE FROM recons');
+    this.db.exec('DELETE FROM cleared');
+    const fold = foldRecon(this.raw('recon'), chartOf(this.doc('ledger/accounts') ?? EMPTY_CHART));
+    this.insertMany(
+      `INSERT INTO recons (pos, id, account, date, amount, exp, cur, cleared, supersedes, superseded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      fold.recons.map(({ id, index, msg, supersededBy }) => {
+        const b = msg.closing_balance;
+        return [
+          index, id, msg.account, msg.statement_date, String(b.amount), b.exp, b.cur,
+          JSON.stringify(msg.cleared), msg.supersedes ?? null, supersededBy ?? null,
+        ];
+      }),
+    );
+    this.insertMany(
+      'INSERT OR IGNORE INTO cleared (account, txn, recon) VALUES (?, ?, ?)',
+      fold.recons
+        .filter((r) => r.supersededBy === undefined)
+        .flatMap(({ id, msg }) => msg.cleared.map((txn) => [msg.account, txn, id])),
+    );
+    this.recordFold('recon', fold.anomalies, fold.halted);
   }
 
   /**
@@ -649,8 +714,10 @@ export class Projection {
   register(account: AccountId, collapse = false): RegisterLine[] {
     const rows = this.db.selectObjects(
       `SELECT t.id, t.kind, t.topic, t.idx, t.date, t.ts, t.payee, t.memo, t.reverses, t.replaces,
-              ${REVERSED_BY} AS reversed_by, ${REPLACED_BY} AS replaced_by, p.split, p.amount, p.exp, p.cur
+              ${REVERSED_BY} AS reversed_by, ${REPLACED_BY} AS replaced_by, p.split, p.amount, p.exp, p.cur,
+              c.recon AS reconciled
        FROM postings p JOIN txns t ON t.id = p.txn
+       LEFT JOIN cleared c ON c.account = p.account AND c.txn = t.id AND t.kind != 'lotadjust'
        WHERE p.account = ?
        ORDER BY t.date, t.topic, t.idx, p.split`,
       [account],
@@ -684,6 +751,7 @@ export class Projection {
       ...(r.reversed_by !== null && { reversedBy: r.reversed_by as MsgId }),
       ...(r.replaces !== null && { replaces: r.replaces as MsgId }),
       ...(r.replaced_by !== null && { replacedBy: r.replaced_by as MsgId }),
+      ...(r.reconciled !== null && { reconciled: r.reconciled as MsgId }),
     }));
     if (collapse) lines = collapsePairs(lines);
 
@@ -813,6 +881,49 @@ export class Projection {
         cur: commodity(r.cur as string),
       }));
     return { splits, accounts: splits.map((s) => s.account) };
+  }
+
+  /**
+   * The transactions a reconciliation of `account` can clear: every entry and reversal
+   * posting to it, with the sum of its splits there. Sums run in `bigint`, never in SQL.
+   */
+  reconcilable(account: AccountId): Map<MsgId, Amount> {
+    const out = new Map<MsgId, Amount>();
+    const rows = this.db.selectObjects(
+      `SELECT p.txn, p.amount, p.exp, p.cur FROM postings p JOIN txns t ON t.id = p.txn
+       WHERE p.account = ? AND t.kind IN ('entry', 'reversal') ORDER BY p.txn, p.split`,
+      [account],
+    );
+    for (const r of rows) {
+      const a: Amount = { amount: BigInt(r.amount as string), exp: r.exp as number, cur: commodity(r.cur as string) };
+      const prev = out.get(r.txn as MsgId);
+      out.set(r.txn as MsgId, prev ? add(prev, a) : a);
+    }
+    return out;
+  }
+
+  /** Every reconciliation of `account` that counts, in the order they were posted. */
+  reconciliations(account: AccountId): Reconciliation[] {
+    const held = this.reconcilable(account);
+    return this.db
+      .selectObjects(
+        `SELECT id, account, date, amount, exp, cur, cleared, supersedes, superseded_by FROM recons
+         WHERE account = ? ORDER BY pos`,
+        [account],
+      )
+      .map((r) => {
+        const cleared = JSON.parse(r.cleared as string) as MsgId[];
+        return {
+          id: r.id as MsgId,
+          account: r.account as AccountId,
+          statementDate: r.date as IsoDate,
+          closingBalance: { amount: BigInt(r.amount as string), exp: r.exp as number, cur: commodity(r.cur as string) },
+          cleared,
+          held: cleared.filter((t) => held.has(t)).length,
+          ...(r.supersedes !== null && { supersedes: r.supersedes as MsgId }),
+          ...(r.superseded_by !== null && { supersededBy: r.superseded_by as MsgId }),
+        };
+      });
   }
 
   /** Σ allocations per envelope, from the `budget` fold. */

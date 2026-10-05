@@ -33,6 +33,7 @@ export type AnomalyKind =
   | 'reversal-mismatch'
   | 'reversed-twice'
   | 'import-id-reused'
+  | 'cleared-twice'
   | 'lot';
 
 export interface Anomaly {

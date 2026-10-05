@@ -18,6 +18,8 @@
  * (0014). "Reverse and re-enter", or "Re-enter" on a reversed entry with no replacement
  * yet, fires `re-enter` for the app to open the entry form as its replacement (0042).
  * "Edit" opens the edit dialog for an entry's memo, payee, receipts, and categories (0015).
+ * A line cleared by a statement reconciliation is marked, and reversing one warns that
+ * the reversal changes a reconciled balance (0018).
  */
 
 import { LitElement, html, css, nothing } from 'lit';
@@ -70,6 +72,8 @@ interface Draft {
   /** The entry's own memo and payee name, for re-entering it. */
   entryMemo?: string;
   entryPayee?: string;
+  /** A statement reconciliation clears the entry on this account. */
+  reconciled: boolean;
 }
 
 @customElement('register-view')
@@ -322,6 +326,12 @@ export class RegisterView extends LitElement {
     .negative {
       color: var(--color-negative);
     }
+
+    .cleared {
+      color: var(--color-positive);
+      padding-left: 0;
+      padding-right: 0;
+    }
   `;
 
   @property({ attribute: false }) projection!: ProjectionClient;
@@ -428,6 +438,7 @@ export class RegisterView extends LitElement {
               <th>Account</th>
               <th class="num">Amount</th>
               <th class="num">Balance ${cur}</th>
+              <th class="cleared" aria-label="Reconciled"></th>
               <th aria-label="Actions"></th>
             </tr>
           </thead>
@@ -460,6 +471,7 @@ export class RegisterView extends LitElement {
         </td>
         <td class="num amount ${amount.amount < 0n ? 'negative' : ''}">${formatAmount(amount)}</td>
         <td class="num ${balance.amount < 0n ? 'negative' : ''}">${formatAmount(balance)}</td>
+        <td class="cleared">${l.reconciled ? html`<span title="Reconciled" aria-label="Reconciled">✓</span>` : nothing}</td>
         <td class="actions">
           ${l.kind === 'entry'
             ? html`<button class="action" type="button" ?disabled=${this.busy}
@@ -488,6 +500,8 @@ export class RegisterView extends LitElement {
                 Posts the opposite of every split, so the entry no longer counts. Both stay in
                 the journal.${d.target.locked || !d.target.segmentOpen
                   ? ' The entry is in a closed period, so the reversal is dated today.'
+                  : ''}${d.reconciled
+                  ? ' The entry is reconciled against a statement, so the reversal changes this account’s reconciled balance unless a later statement clears it too.'
                   : ''}
               </p>
               ${this.draftError ? html`<div class="error" role="alert">${this.draftError}</div>` : nothing}
@@ -558,6 +572,7 @@ export class RegisterView extends LitElement {
       this.draftError = '';
       this.draft = {
         target, date: defaultReversalDate(target, today()), memo: '', entryMemo: l.memo, entryPayee: this.payeeOf(l),
+        reconciled: l.reconciled !== undefined,
       };
     } catch (err) {
       this.error = errorMessage(err);

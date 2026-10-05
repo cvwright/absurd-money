@@ -5,7 +5,7 @@
  * ledger's operations. For now that is authentication, the chart of accounts
  * (`ledger/accounts`), the owner's password (0033), the budget document (`ledger/budget`), the list of journal years
  * (`ledger/journal`), the payee list (`ledger/payees`), posting entries, reversals, and edits to the journal, period
- * closes to `checkpoints`, receipts as
+ * closes to `checkpoints`, statement reconciliations to `recon`, receipts as
  * encrypted blobs, reading a journal segment, and fetching and decrypting messages for the
  * sync (sync.ts); the other State documents come in later issues. A post that loses the
  * race for its topic's chain is retried against the new head (topic-append.ts).
@@ -24,9 +24,10 @@ import { EMPTY_JOURNAL, journalUpdateProblems, withYear } from '@/core/journal.j
 import { parseJsonBytes } from '@/core/json.js';
 import {
   encodeMessage, isStatePath, TOPIC_TYPES, type AccountsDoc, type BudgetDoc, type Edit, type Entry,
-  type MessageTypes, type PayeesDoc, type Reversal,
+  type MessageTypes, type PayeesDoc, type Recon, type Reversal,
 } from '@/core/messages.js';
 import { cleanPayeeName, EMPTY_PAYEES, findPayee, payeesUpdateProblems, withPayee } from '@/core/payees.js';
+import { reconPostProblems, type ReconPostContext } from '@/core/recon.js';
 import { reversalPostProblems, type ReversalTarget } from '@/core/reversal.js';
 import { entryPostProblems } from '@/core/validate.js';
 import type { LogMessage } from '@/projection/projection.js';
@@ -77,7 +78,7 @@ export function budgetSpec(chart: Chart): DocSpec<'ledger/budget'> {
   };
 }
 
-/** An entry, reversal, edit, or close broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
+/** An entry, reversal, edit, close, or reconciliation broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
 export class InvalidEntryError extends Error {
   constructor(readonly problems: readonly string[]) {
     super(problems.join('; '));
@@ -286,6 +287,24 @@ export class LedgerSpace {
       return new TextEncoder().encode(encodeMessage('ledger.checkpoint', close));
     });
     return id as MsgId;
+  }
+
+  /**
+   * Posts a completed statement reconciliation to `recon`, after checking it against the
+   * post-time rules with the latest chart. `ctx` is what the projection holds for the
+   * account (`Projection.reconciliations` and `Projection.reconcilable`). Returns the new
+   * message's ID.
+   *
+   * Like `postEntry`, a post that loses the race for the topic is retried without checking
+   * again. If another device reconciled the same transactions meanwhile, both recons count
+   * and the fold reports the later one as `cleared-twice`.
+   */
+  async postRecon(recon: Recon, ctx: Omit<ReconPostContext, 'chart'>): Promise<MsgId> {
+    const chart = chartOf(await this.loadAccounts());
+    const problems = reconPostProblems(recon, { ...ctx, chart });
+    if (problems.length > 0) throw new InvalidEntryError(problems);
+    const data = new TextEncoder().encode(encodeMessage('ledger.recon', recon));
+    return (await appendMessage(this.topics, 'recon', 'ledger.recon', () => data)) as MsgId;
   }
 
   /** Encrypts `bytes` under a fresh key and uploads them, for an entry's `receipts`. */

@@ -477,7 +477,7 @@ A completed statement reconciliation.
 | `v` | `1` | yes | |
 | `account` | `AccountId` | yes | An `asset` or `liability` account. |
 | `statement_date` | `Date` | yes | |
-| `closing_balance` | `Amount` | yes | The statement's closing balance. `cur` equals the account's `cur`. |
+| `closing_balance` | `Amount` | yes | The statement's closing balance, signed as balances are, positive for a debit: a card statement showing 500.00 owed is `"-50000"`. `cur` equals the account's `cur`. |
 | `cleared` | `MsgId[]` | yes | The entries and reversals this statement clears, for this account. May be empty and may span two segments. No duplicates. |
 | `statement` | `BlobRef` | no | The statement file. |
 | `supersedes` | `MsgId` | no | An earlier `ledger.recon` for the same account that this one replaces. The superseded message's `cleared` set no longer counts. This is how a mistaken reconciliation is fixed. |
@@ -485,6 +485,26 @@ A completed statement reconciliation.
 An entry is cleared **for an account** if and only if its hash is in the `cleared` set of
 some recon for that account that has not been superseded. Clearing applies to all of the
 entry's splits on that account.
+
+Fold-time rules:
+
+- `account` exists and is an `asset` or `liability` account, and `closing_balance.cur`
+  equals its `cur`.
+- `supersedes`, when present, names an earlier recon in the chain that counts, for the
+  same `account`.
+
+A recon that breaks a rule is ignored and doesn't supersede anything. Whether a `cleared`
+hash names a transaction on the account is not a fold-time rule, since the journal may
+not be synced yet: a hash that names none clears nothing. Two recons that are not
+superseded and clear the same transaction for the same account both count, and the later
+one is surfaced as `cleared-twice` (two devices reconciling at once).
+
+Post-time: every `cleared` hash is an entry or reversal with a split on the account, and
+none is already cleared by a recon that will still stand; `supersedes` names a recon that
+has not been superseded; `statement_date` is after the latest recon of the account that
+will still stand; and the account's cleared balance, the sum of the splits on it in every
+transaction cleared by a recon that will still stand, this one included, equals
+`closing_balance`.
 
 ### `ledger.checkpoint` (topic `checkpoints`)
 

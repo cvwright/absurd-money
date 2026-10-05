@@ -169,6 +169,15 @@ All notable changes to this project are documented here. The format follows
   closed) and hasn't been reversed; the projection's `openings` query lists the accounts
   it opens. Each such account is marked with its opening date, and posting one again
   needs a second confirmation that names it and suggests a reversal instead (0035).
+- Statement reconciliation (0018). The Reconcile page takes a statement's date and
+  closing balance, offers each entry and reversal on an asset or liability account that
+  isn't yet cleared, and when the cleared balance equals the closing balance posts the
+  statement as one `ledger.recon` to the `recon` topic. The latest reconciliation can be
+  redone, which posts a recon that `supersedes` it. The projection folds `recon` (its
+  fold-time rules are now in SCHEMAS.md) and derives cleared status per account and
+  transaction, never storing it on the transaction; the register marks reconciled lines,
+  and the reversal dialog warns before reversing one. Two standing recons that clear the
+  same transaction are reported as `cleared-twice`. `PROJECTION_VERSION` is 4.
 - The projection staying decrypted in OPFS is documented and accepted, not fixed. The
   device's disk encryption is assumed; see "Design A" in the design doc (0043).
 
