@@ -36,3 +36,37 @@ from disk.
 - Measure the per-page cost against the 10k-entry space from 0039 before choosing.
 - The key must be available inside the projection worker, which today never sees the
   space keys. 0041 (decrypting in the worker) moves the same way.
+
+## Resolution
+
+2026-10-04. Accepted as a risk, not fixed. Nothing in the code changed; the decision is
+recorded under "Design A" in `design/ACCOUNTING.md`.
+
+- **Out of reach anyway.** Malware on the host can read memory while the app is unlocked,
+  or capture the password or the passkey prompt at the next unlock. No at-rest scheme
+  changes that.
+- **Covered by the OS.** A stolen or discarded device is protected by full-disk
+  encryption (FileVault, BitLocker, and phones by default), which is assumed. As far as
+  we know, browser profile sync doesn't carry OPFS.
+- **Residual exposure.** Unencrypted disks, and unencrypted backups of the profile (for
+  example Time Machine without encryption), hold the books in plaintext. 0033 still holds
+  there: whoever has the files can't write to the books or decrypt anything new.
+- **Deleting on lock was rejected as a half-measure.** Locking only runs in a live page.
+  Closing the tab or the browser, or a crash, leaves the projection on disk, which is the
+  case this issue was about.
+
+If this is revisited, the preferred design is an encrypted log with in-memory folds:
+
+- Each log row's `body` is encrypted with AES-GCM before it's written. The key is
+  HKDF-derived from `symmetric_root` (info `absurd-money/projection/v1`) and
+  non-extractable. It's posted to the worker as a `CryptoKey`, so the worker still never
+  sees the space keys.
+- The fold tables live in an `ATTACH ':memory:'` schema and are refolded from the log on
+  every unlock, with no network.
+- Nothing readable reaches disk, so lock, close, and crash are all safe without a wipe
+  step. Hash, prev, type, sender, timestamp, and topic stay readable, which the server
+  sees anyway.
+- The cost is decrypting the log plus a full refold on every unlock, to be measured with
+  0039.
+- A page-encrypting VFS was ruled out. SQLite's VFS calls are synchronous, so it can't
+  use WebCrypto and would need raw key bytes in memory (against 0034).

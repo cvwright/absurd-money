@@ -10,7 +10,6 @@ Next ID: 0045
 - [ ] 0039 Measure cold start against a seeded 10k-entry space, on desktop and on a phone
 - [ ] 0044 Try passkey unlock on iCloud Keychain, Google Password Manager, 1Password, and a
   hardware key, in Safari, Chrome, and Firefox; note which return the PRF at creation
-- [ ] [0043](issues/0043-projection-at-rest.md) The projection encrypted at rest, or deleted on lock
 
 ## Milestone 2: Reconciliation
 

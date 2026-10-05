@@ -79,7 +79,8 @@ Deferred:
 
 - 0043: the projection is still a decrypted copy of the books in OPFS. Someone with the
   profile can't write to the books or read new entries, but can read what was synced.
-  The first acceptance criterion holds for the keys, not for that copy.
+  The first acceptance criterion holds for the keys, not for that copy. (Later accepted
+  as a risk rather than fixed; see 0043's resolution.)
 - 0044: trying the passkey flow on real authenticators, as the notes above ask. It is
   untested on hardware.
 

@@ -805,6 +805,12 @@ free. Reports then run against local SQL at full speed.
   write ever, paged at ≤1000 messages per request, decrypted and folded. For a decade of
   personal finance, plausibly 50k–200k messages. Tolerable on a desktop; painful as the
   first-launch experience on a phone, and paid again on every reinstall.
+- **Device leakage:** the projection is a decrypted copy of the books in OPFS, and it
+  stays on disk when the app locks or the tab closes. Someone with the browser profile can
+  read what was synced, but can't write to the books or read new entries, because the keys
+  are wrapped at rest. This is accepted: the device's disk encryption is assumed, and live
+  malware on an unlocked device can't be defended against anyway. Unencrypted disks and
+  backups are the residual exposure. See issue 0043.
 
 ### Design B — Checkpointed replay
 

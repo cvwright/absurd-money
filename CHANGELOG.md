@@ -169,6 +169,8 @@ All notable changes to this project are documented here. The format follows
   closed) and hasn't been reversed; the projection's `openings` query lists the accounts
   it opens. Each such account is marked with its opening date, and posting one again
   needs a second confirmation that names it and suggests a reversal instead (0035).
+- The projection staying decrypted in OPFS is documented and accepted, not fixed. The
+  device's disk encryption is assumed; see "Design A" in the design doc (0043).
 
 ### Changed
 
