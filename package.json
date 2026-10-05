@@ -13,20 +13,20 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@noble/hashes": "^1.8.0",
-    "@sqlite.org/sqlite-wasm": "^3.53.4-build2",
+    "@noble/hashes": "1.8.0",
+    "@sqlite.org/sqlite-wasm": "3.53.4-build1",
     "csv-parse": "7.0.3",
-    "lit": "^3.3.3",
+    "lit": "3.3.3",
     "reeeductio": "file:../../reeeductio/typescript-sdk"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "eslint": "^10.12.0",
-    "markdownlint-cli2": "^0.23.3",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.71.0",
-    "vite": "^8.3.2",
-    "vite-plugin-pwa": "^2.0.0",
-    "vitest": "^4.1.11"
+    "@eslint/js": "10.0.1",
+    "eslint": "10.11.0",
+    "markdownlint-cli2": "0.23.3",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.1",
+    "vite": "8.3.1",
+    "vite-plugin-pwa": "1.3.0",
+    "vitest": "4.1.11"
   }
 }

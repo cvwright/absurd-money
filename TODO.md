@@ -4,7 +4,7 @@ Open issues, grouped by milestone, in priority order. An issue is open
 if and only if it is listed here. See
 [issues/README.md](issues/README.md) for the workflow.
 
-Next ID: 0045
+Next ID: 0046
 
 ## Milestone 1: Core ledger
 
@@ -36,6 +36,9 @@ Next ID: 0045
 
 ## Later
 
+- [ ] 0045 Upgrade `vite-plugin-pwa` to 2.x once a release is at least
+      7 days old (2.0.0 was published 2026-10-03); read its breaking
+      changes and check the generated service worker
 - [ ] 0027 Investments: commodity accounts, lots, derived lot depletion.
       Write the basis-conservation tests first.
 - [ ] 0028 Checkpoint writer and cold start from checkpoints
