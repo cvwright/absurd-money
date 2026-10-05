@@ -164,6 +164,11 @@ All notable changes to this project are documented here. The format follows
   at least one. A new device connects with the space ID and either the password or the
   recovery key, and can then add its own passkey. Keys left in localStorage by older
   versions are protected on first open and then deleted (0033).
+- The opening-balances view warns before opening an account twice. An entry counts as an
+  opening if it posts to an "Opening Balances" equity account (any commodity, open or
+  closed) and hasn't been reversed; the projection's `openings` query lists the accounts
+  it opens. Each such account is marked with its opening date, and posting one again
+  needs a second confirmation that names it and suggests a reversal instead (0035).
 
 ### Changed
 

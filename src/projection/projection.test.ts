@@ -307,6 +307,30 @@ describe('Projection', () => {
     expect(p.anomalies()).toMatchObject([{ kind: 'edit-ignored', detail: 'target is locked' }]);
   });
 
+  it('finds the accounts that standing opening entries already open', () => {
+    const p = Projection.open(memoryDb());
+    p.append('state', stateWith());
+    const y25 = chain(500);
+    const j = chain();
+    const first = y25('first', 'ledger.entry', entry('2025-12-31', [usd(A.checking, 50000), usd(A.visa, -2000), usd(A.equity, -48000)]));
+    const pay = j('pay', 'ledger.entry', entry('2026-01-02', [usd(A.checking, 1000), usd(A.salary, -1000)]));
+    const again = j('again', 'ledger.entry', entry('2026-01-03', [usd(A.checking, 700), usd(A.equity, -700)]));
+    const undone = j('undone', 'ledger.entry', entry('2026-01-04', [usd(A.visa, -300), usd(A.equity, 300)]));
+    const rev = j('rev', 'ledger.reversal', {
+      v: 1, date: '2026-01-05', reverses: undone.hash, splits: [usd(A.visa, 300), usd(A.equity, -300)],
+    });
+    p.append('journal-2025', [first]);
+    p.append('journal-2026', [pay, again, undone, rev]);
+
+    expect(p.openings([A.equity])).toEqual([
+      { account: A.checking, txn: first.hash, date: '2025-12-31' },
+      { account: A.visa, txn: first.hash, date: '2025-12-31' },
+      { account: A.checking, txn: again.hash, date: '2026-01-03' },
+    ].sort((x, y) => x.date.localeCompare(y.date) || x.account.localeCompare(y.account)));
+    expect(p.openings([A.tradingUsd])).toEqual([]);
+    expect(p.openings([])).toEqual([]);
+  });
+
   it('lists closes, and counts the entries a close locks past its period', () => {
     const p = Projection.open(memoryDb());
     p.append('state', stateWith());

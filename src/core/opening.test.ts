@@ -4,7 +4,7 @@ import { accountLabel, accountPath, chartOf } from './chart.js';
 import type { AccountId } from './ids.js';
 import { encodeMessage, type AccountsDoc } from './messages.js';
 import {
-  findOpeningEquity, openingCommodities, openingEntry, openingEquityAccount, OPENING_EQUITY_NAME,
+  findOpeningEquity, openingCommodities, openingEntry, openingEquityAccount, openingEquityAccounts, OPENING_EQUITY_NAME,
   type OpeningLine,
 } from './opening.js';
 import { A, accountsDoc, acct, chart, day } from './testing.js';
@@ -144,6 +144,24 @@ describe('findOpeningEquity', () => {
     expect(findOpeningEquity(chartOf(doc), USD)).toBe(id('ob-a'));
     expect(findOpeningEquity(chartOf(doc), VTI)).toBeUndefined();
     expect(findOpeningEquity(chart, USD)).toBeUndefined();
+  });
+});
+
+describe('openingEquityAccounts', () => {
+  it('lists every "Opening Balances" equity account, closed ones too', () => {
+    const id = (s: string) => acct(s) as AccountId;
+    const doc: AccountsDoc = {
+      ...accountsDoc,
+      accounts: {
+        ...accountsDoc.accounts,
+        [id('ob-b')]: openingEquityAccount(USD),
+        [id('ob-a')]: { ...openingEquityAccount(VTI), name: 'opening balances ' },
+        [id('ob-closed')]: { ...openingEquityAccount(USD), closed_at: day('2026-01-01') },
+        [id('ob-asset')]: { ...openingEquityAccount(USD), type: 'asset' },
+      },
+    };
+    expect(openingEquityAccounts(chartOf(doc))).toEqual([id('ob-a'), id('ob-b'), id('ob-closed')].sort());
+    expect(openingEquityAccounts(chart)).toEqual([]);
   });
 });
 

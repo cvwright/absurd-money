@@ -7,8 +7,9 @@
  * open equity account named "Opening Balances" in that commodity, which is added to the
  * chart first if it isn't there.
  *
- * Nothing here can see the journal yet, so it can't tell whether opening balances were
- * already posted (0035).
+ * An account that a standing opening entry already opened is marked, and posting it again
+ * needs a second confirmation (0035). An opening entry has no flag: it is any entry that
+ * posts to an "Opening Balances" equity account, and that hasn't been reversed.
  */
 
 import { LitElement, html, css, nothing } from 'lit';
@@ -19,10 +20,11 @@ import { ParseError } from '@/core/errors.js';
 import { isIsoDate, newAccountId, yearOf, type AccountId, type IsoDate, type MsgId } from '@/core/ids.js';
 import type { Account, AccountsDoc, Entry } from '@/core/messages.js';
 import {
-  findOpeningEquity, openingCommodities, openingEntry, openingEquityAccount,
+  findOpeningEquity, openingCommodities, openingEntry, openingEquityAccount, openingEquityAccounts,
   type OpeningLine, type OpeningLot,
 } from '@/core/opening.js';
 import type { ProjectionClient } from '@/projection/client.js';
+import type { Opening } from '@/projection/projection.js';
 import { InvalidEntryError, type LedgerSpace } from '@/services/ledger-space.js';
 import { today } from './dates.js';
 import { amountOf, comparePaths, errorMessage } from './forms.js';
@@ -228,6 +230,16 @@ export class OpeningView extends LitElement {
       margin-bottom: var(--spacing-md);
     }
 
+    .warning {
+      color: var(--color-warning);
+      margin-bottom: var(--spacing-md);
+    }
+
+    .opened {
+      color: var(--color-text-subdued);
+      font-size: var(--font-size-sm);
+    }
+
     .posted {
       color: var(--color-positive);
       margin-bottom: var(--spacing-md);
@@ -258,10 +270,48 @@ export class OpeningView extends LitElement {
   @state() private busy = false;
   @state() private error = '';
   @state() private posted: { id: MsgId; date: IsoDate } | null = null;
+  /** The accounts standing opening entries already open, earliest first. */
+  @state() private openings: Opening[] = [];
+
+  /** Counts queries, so a slow answer for an older chart is dropped. */
+  private generation = 0;
+  private readonly onChange = () => void this.load();
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.projection.addEventListener('change', this.onChange);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.projection.removeEventListener('change', this.onChange);
+  }
+
+  willUpdate(changed: Map<PropertyKey, unknown>) {
+    if (changed.has('projection') || changed.has('doc')) void this.load();
+  }
+
+  private async load() {
+    const generation = ++this.generation;
+    try {
+      const openings = await this.projection.call('openings', openingEquityAccounts(chartOf(this.doc)));
+      if (generation === this.generation) this.openings = openings;
+    } catch (err) {
+      if (generation === this.generation) this.error = errorMessage(err);
+    }
+  }
+
+  /** The first opening entry date of each account that has one. */
+  private openedOn(openings: readonly Opening[]): Map<AccountId, IsoDate> {
+    const out = new Map<AccountId, IsoDate>();
+    for (const o of openings) if (!out.has(o.account)) out.set(o.account, o.date);
+    return out;
+  }
 
   render() {
     const assets = rowsOf(this.doc, 'asset');
     const liabilities = rowsOf(this.doc, 'liability');
+    const opened = this.openedOn(this.openings);
     return html`
       <h2>Opening balances</h2>
       <p class="intro">
@@ -285,26 +335,34 @@ export class OpeningView extends LitElement {
           @input=${(e: Event) => (this.date = (e.target as HTMLInputElement).value)} />
       </label>
 
-      ${this.renderSection('Assets', assets, true)}
-      ${this.renderSection('Liabilities, amount owed', liabilities, false)}
+      ${opened.size > 0
+        ? html`<p class="warning">
+            Opening balances have already been posted for ${opened.size === 1 ? 'one account' : `${opened.size} accounts`},
+            marked below. Posting them again counts those balances twice; to correct one,
+            reverse its opening entry in the register instead.
+          </p>`
+        : nothing}
+
+      ${this.renderSection('Assets', assets, true, opened)}
+      ${this.renderSection('Liabilities, amount owed', liabilities, false, opened)}
 
       <button class="primary" type="button" ?disabled=${this.busy || assets.length + liabilities.length === 0}
         @click=${this.post}>Post opening balances</button>
     `;
   }
 
-  private renderSection(title: string, rows: Row[], lotsAllowed: boolean) {
+  private renderSection(title: string, rows: Row[], lotsAllowed: boolean, opened: ReadonlyMap<AccountId, IsoDate>) {
     return html`
       <section>
         <h3>${title}</h3>
         ${rows.length === 0
           ? html`<div class="empty">No open accounts. Add them under Accounts.</div>`
-          : rows.map((r) => this.renderAccount(r, lotsAllowed))}
+          : rows.map((r) => this.renderAccount(r, lotsAllowed, opened.get(r.id)))}
       </section>
     `;
   }
 
-  private renderAccount({ id, account: a, path }: Row, lotsAllowed: boolean) {
+  private renderAccount({ id, account: a, path }: Row, lotsAllowed: boolean, openedOn: IsoDate | undefined) {
     const lots = this.lots[id];
     const label = path.join(' › ');
     return html`
@@ -312,6 +370,7 @@ export class OpeningView extends LitElement {
         <span class="name" title=${label}>${path.slice(0, -1).map(
           (p) => html`<span class="parent">${p} › </span>`,
         )}${a.name}</span>
+        ${openedOn ? html`<span class="opened">opened ${openedOn}</span>` : nothing}
         ${lots
           ? html`<button class="link" type="button" @click=${() => this.setLots(id, undefined)}>Enter a balance</button>`
           : html`
@@ -413,7 +472,13 @@ export class OpeningView extends LitElement {
         .map((c) => [c, newAccountId(crypto.getRandomValues(new Uint8Array(15)))] as const);
       const proposed = withEquity(this.doc, missing);
       const preview = build(date, lines, proposed);
+      // Ask the projection again rather than trust what was last shown.
+      const openings = await this.projection.call('openings', openingEquityAccounts(chartOf(this.doc)));
+      this.openings = openings;
+      const opened = this.openedOn(openings);
+      const again = lines.filter((l) => opened.has(l.account));
       if (!confirm(this.summary(preview, chartOf(proposed)))) return;
+      if (again.length > 0 && !confirm(this.repeatWarning(again.map((l) => l.account), opened))) return;
 
       const doc = missing.length > 0 ? await this.addEquityAccounts(missing) : this.doc;
       const segmentOpen = await this.projection.call('segmentOpen', yearOf(date));
@@ -432,6 +497,16 @@ export class OpeningView extends LitElement {
     const doc = await this.ledger.updateAccounts((doc) => withEquity(doc, missing));
     this.dispatchEvent(new CustomEvent<AccountsDoc>('accounts-changed', { detail: doc, bubbles: true }));
     return doc;
+  }
+
+  private repeatWarning(accounts: readonly AccountId[], opened: ReadonlyMap<AccountId, IsoDate>): string {
+    const chart = chartOf(this.doc);
+    const lines = accounts.map((id) => `${accountLabel(chart, id)}: opened ${opened.get(id)}`);
+    return (
+      'These accounts already have opening balances. Posting again adds to them, so each ' +
+      'balance counts twice. To correct one, reverse its opening entry instead.\n\n' +
+      `${lines.join('\n')}\n\nPost anyway?`
+    );
   }
 
   private summary(entry: Entry, chart: Chart): string {

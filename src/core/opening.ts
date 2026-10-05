@@ -62,6 +62,18 @@ export function findOpeningEquity(chart: Chart, cur: Commodity): AccountId | und
   });
 }
 
+/**
+ * Every equity account named "Opening Balances", in any commodity, open or closed: the
+ * accounts whose entries count as opening balances already posted (0035). An opening entry
+ * has no flag, so this is how one is recognized.
+ */
+export function openingEquityAccounts(chart: Chart): AccountId[] {
+  return [...chart]
+    .filter(([, a]) => a.type === 'equity' && a.name.trim().toLowerCase() === OPENING_EQUITY_NAME.toLowerCase())
+    .map(([id]) => id)
+    .sort();
+}
+
 /** A new chart entry for the opening equity account in `cur`. */
 export function openingEquityAccount(cur: Commodity): Account {
   return { name: OPENING_EQUITY_NAME, type: 'equity', cur, parent: null };

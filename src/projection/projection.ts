@@ -103,6 +103,13 @@ export interface Close {
   readonly held: boolean;
 }
 
+/** An account that a standing opening entry already brings to a balance. */
+export interface Opening {
+  readonly account: AccountId;
+  readonly txn: MsgId;
+  readonly date: IsoDate;
+}
+
 export type TxnKind = 'entry' | 'reversal' | 'lotadjust';
 
 /** One split of one transaction, as an account's register shows it. */
@@ -765,6 +772,25 @@ export class Projection {
       "SELECT count(*) FROM txns WHERE topic = ? AND kind = 'entry' AND date > ?",
       [segmentOf(year), date],
     ) as number;
+  }
+
+  /**
+   * The accounts that already have opening balances: each other account in an unreversed
+   * entry that posts to one of `equity`, the opening equity accounts. Earliest first, so
+   * an account in two opening entries is listed once per entry.
+   */
+  openings(equity: readonly AccountId[]): Opening[] {
+    if (equity.length === 0) return [];
+    const marks = equity.map(() => '?').join(', ');
+    return this.db
+      .selectObjects(
+        `SELECT DISTINCT p.account, t.id, t.date, t.topic, t.idx FROM postings p JOIN txns t ON t.id = p.txn
+         WHERE t.kind = 'entry' AND ${REVERSED_BY} IS NULL AND p.account NOT IN (${marks})
+           AND EXISTS (SELECT 1 FROM postings q WHERE q.txn = t.id AND q.account IN (${marks}))
+         ORDER BY t.date, t.topic, t.idx, p.account`,
+        [...equity, ...equity],
+      )
+      .map((r) => ({ account: r.account as AccountId, txn: r.id as MsgId, date: r.date as IsoDate }));
   }
 
   /** Whether the segment of `year` is open: no close has frozen it. */
