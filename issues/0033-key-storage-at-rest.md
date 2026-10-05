@@ -49,3 +49,37 @@ can produce, and store the wrapped bundle in IndexedDB. Two sources for the KEK:
 - The unwrapped keys are still raw bytes in memory here, because the SDK needs them that
   way. 0034 removes that.
 - Defense in depth for the in-origin case is the CSP (`script-src 'self'`). Don't loosen it.
+
+## Resolution
+
+2026-10-04. Built in `src/services/key-wrap.ts` (format and tests), `passkey.ts` (WebAuthn
+PRF), `credentials.ts` (IndexedDB record, unlocking, migration), `LedgerSpace.setPassword`,
+and the unlock and protect views.
+
+- **Passkey.** One wrapped copy per credential ID, each with its own random PRF salt.
+  Unlocking asks for any of them in one prompt with `evalByCredential`. KEK =
+  HKDF-SHA256(PRF output, info `absurd-money/kek/v1`), non-extractable; the AES-GCM
+  associated data binds the copy to the space ID, credential ID, and salt. New passkeys
+  exclude this device's existing ones. Offered when `getClientCapabilities()` doesn't
+  rule out PRF; an authenticator without it is refused at creation, with a password as
+  the other way in.
+- **Password.** OPAQUE username `owner` (a literal, since it appears in a path).
+  `setPassword` runs `enableOpaque()` and `opaqueRegister()` each time; setting it again
+  replaces it. A password manager sees the space ID as the username. Unlocking needs the
+  server, by design.
+- **Every unlock path checks** that the private key signs for the space ID before using it.
+- **Locking** is allowed only once the device has a way back in, so new books can't lock
+  before a passkey or password is saved. It happens after 15 minutes without input,
+  counting background time. Work in flight when it locks is abandoned.
+- **Not done here:** the keys are still zeroed only best effort (0034). Password changes
+  re-register under the same username. Whether the server rate-limits OPAQUE logins
+  wasn't checked; the 429 path is handled.
+
+Deferred:
+
+- 0043: the projection is still a decrypted copy of the books in OPFS. Someone with the
+  profile can't write to the books or read new entries, but can read what was synced.
+  The first acceptance criterion holds for the keys, not for that copy.
+- 0044: trying the passkey flow on real authenticators, as the notes above ask. It is
+  untested on hardware.
+

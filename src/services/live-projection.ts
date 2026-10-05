@@ -68,6 +68,15 @@ export class LiveProjection extends EventTarget {
     this.projection.close();
   }
 
+  /**
+   * Deletes the projection of `spaceId` from this device when it isn't open, as after
+   * locking. Waits like `start` if another tab has it open.
+   */
+  static async wipe(spaceId: string, onWaiting: () => void): Promise<void> {
+    const projection = await ProjectionClient.open(spaceId, onWaiting);
+    await projection.wipe();
+  }
+
   /** Stops, and deletes the projection from this device. */
   async wipe(): Promise<void> {
     this.stream.close();

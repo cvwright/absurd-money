@@ -152,6 +152,18 @@ All notable changes to this project are documented here. The format follows
   `LedgerSpace` post: entries, reversals, edits, and closes. A close is rebuilt on each
   attempt, so it cites its segment's newest head. The retry logic (`appendMessage`) sits
   behind a `TopicBackend` seam and is tested against a fake, like `updateDoc` (0017).
+- Keys wrapped at rest. The private key and symmetric root are no longer stored in the
+  clear. This device keeps, in IndexedDB, only the space ID, the server, whether a
+  password is set, and one copy of the keys per passkey, wrapped under a key derived from
+  that passkey's WebAuthn PRF output (AES-256-GCM, bound to the space and credential, with
+  a `v` for the format). The password is OPAQUE: the server holds the keys wrapped under
+  the export key. The app starts locked and unlocks with a passkey, the password, or the
+  recovery key. It locks after 15 minutes without input, or from the Lock button, which
+  drops the keys, the `LedgerSpace`, and the projection from memory. New books show the
+  recovery key, then ask for a passkey (when the browser offers PRF) and/or a password,
+  at least one. A new device connects with the space ID and either the password or the
+  recovery key, and can then add its own passkey. Keys left in localStorage by older
+  versions are protected on first open and then deleted (0033).
 
 ### Changed
 

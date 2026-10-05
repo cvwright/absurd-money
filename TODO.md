@@ -3,15 +3,16 @@
 Open issues, grouped by milestone, in priority order. An issue is open if and only if it is
 listed here. See [issues/README.md](issues/README.md) for the workflow.
 
-Next ID: 0043
+Next ID: 0045
 
 ## Milestone 1: Core ledger
 
 - [ ] 0039 Measure cold start against a seeded 10k-entry space, on desktop and on a phone
 - [ ] 0035 Warn before posting opening balances for an account that already has them
   (needs the projection)
-- [ ] [0033](issues/0033-key-storage-at-rest.md) Keys wrapped at rest, unlocked by passkey (WebAuthn
-  PRF) or OPAQUE password
+- [ ] 0044 Try passkey unlock on iCloud Keychain, Google Password Manager, 1Password, and a
+  hardware key, in Safari, Chrome, and Firefox; note which return the PRF at creation
+- [ ] [0043](issues/0043-projection-at-rest.md) The projection encrypted at rest, or deleted on lock
 
 ## Milestone 2: Reconciliation
 

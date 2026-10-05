@@ -3,7 +3,7 @@
  *
  * One set of books is one reeeductio space. This wraps the SDK's `Space` with the
  * ledger's operations. For now that is authentication, the chart of accounts
- * (`ledger/accounts`), the budget document (`ledger/budget`), the list of journal years
+ * (`ledger/accounts`), the owner's password (0033), the budget document (`ledger/budget`), the list of journal years
  * (`ledger/journal`), the payee list (`ledger/payees`), posting entries, reversals, and edits to the journal, period
  * closes to `checkpoints`, receipts as
  * encrypted blobs, reading a journal segment, and fetching and decrypting messages for the
@@ -30,7 +30,7 @@ import { cleanPayeeName, EMPTY_PAYEES, findPayee, payeesUpdateProblems, withPaye
 import { reversalPostProblems, type ReversalTarget } from '@/core/reversal.js';
 import { entryPostProblems } from '@/core/validate.js';
 import type { LogMessage } from '@/projection/projection.js';
-import type { SpaceCredentials } from './credentials.js';
+import { OWNER_USERNAME, type SpaceCredentials } from './credentials.js';
 import {
   loadDoc,
   StaleHeadError,
@@ -125,6 +125,18 @@ export class LedgerSpace {
       );
     }
     return this.authPromise;
+  }
+
+  /**
+   * Sets the owner's password, or replaces it: the keys are wrapped under the password's
+   * OPAQUE export key and stored on the server, so the password opens the books on any
+   * device. Only the space's creator can do this. Enabling OPAQUE on the space is
+   * idempotent, so it is simply done every time.
+   */
+  async setPassword(password: string): Promise<void> {
+    await this.authenticate();
+    await this.space.enableOpaque();
+    await this.space.opaqueRegister(OWNER_USERNAME, password);
   }
 
   /** The chart of accounts. A space whose chart was never written has an empty one. */
