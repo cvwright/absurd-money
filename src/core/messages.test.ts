@@ -215,4 +215,29 @@ describe('State documents', () => {
     const debitCredit = { ...profile, header: false, date: { column: 0, format: 'YYYY-MM-DD' }, amount: { debit: 1, credit: 2 }, description: { column: 3 } };
     expect(decodeState('ledger/import-profiles', doc(debitCredit)).profiles[A.checking].amount).toEqual({ debit: 1, credit: 2 });
   });
+  it('import profiles: encoding, skip_end_rows, memo, YY, and delimiter', () => {
+    const profile = {
+      delimiter: ',', skip_rows: 0, header: true,
+      date: { column: 'Date', format: 'MM/DD/YY' },
+      amount: { column: 'Amount', negate: false },
+      description: { column: 'Description' },
+      exp: 2,
+    };
+    const doc = (p: object) => ({ v: 1, rev: 1, profiles: { [A.checking]: { ...profile, ...p } } });
+    const full = doc({ encoding: 'windows-1252', skip_end_rows: 2, memo: { column: 'Memo' } });
+    expect(decodeState('ledger/import-profiles', full).profiles[A.checking]).toMatchObject({
+      encoding: 'windows-1252', skip_end_rows: 2, memo: { column: 'Memo' },
+    });
+    for (const bad of [
+      { encoding: 'latin1' },
+      { encoding: 'UTF-8' },
+      { skip_end_rows: -1 },
+      { memo: { column: 3 } },
+      { date: { column: 'Date', format: 'YY/YYYY/MM/DD' } },
+      { delimiter: '"' },
+      { delimiter: '\n' },
+    ]) {
+      expect(() => decodeState('ledger/import-profiles', doc(bad)), JSON.stringify(bad)).toThrow(CodecError);
+    }
+  });
 });

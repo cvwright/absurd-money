@@ -45,7 +45,9 @@ of case or padding) and nothing more.
 ## `normalizeDescription`
 
 The input is the description cell as a string, after the file is decoded
-and the CSV is parsed (0020). The steps, in order:
+(see "Reading a file" under `ledger/import-profiles` in
+[SCHEMAS.md](SCHEMAS.md)) and parsed with the grammar in "CSV grammar"
+below. The steps, in order:
 
 1. **Well-formed.** Replace each lone UTF-16 surrogate with U+FFFD
    (`String.prototype.toWellFormed`). Text decoded from bytes never has
@@ -206,6 +208,31 @@ Because `n` counts **normalized** descriptions, `BLUE BOTTLE` and
 `Blue  Bottle` on the same date with the same amount are `#0` and `#1`
 in one file. They are the same string for every purpose here.
 
+## CSV grammar
+
+The description cell is a label input, so the grammar that produces it
+is pinned under `import/v1` too, and the vectors below are the spec. The
+implementation wraps [`csv-parse`](https://csv.js.org/parse/), pinned
+to an exact version, in `src/core/csv.ts`. Any upgrade must pass every
+vector. Issue 0020.
+
+The input is the decoded text after `skip_rows` and `skip_end_rows`.
+The delimiter is the profile's.
+
+- **Quoting.** The quote is `"`, and `""` inside a quoted field is one
+  `"`. A quoted field may contain the delimiter and line breaks, which
+  are kept as they are, CRLF included.
+- **Stray quotes are literal.** A `"` that doesn't open a field is an
+  ordinary character: `5" PIZZA` is `5" PIZZA`, and `"abc"def` is
+  `"abc"def`. Bank exports contain the first.
+- **An unterminated quote fails** the import.
+- **Records** end at CRLF, LF, or a lone CR. Empty lines are skipped. A
+  line of only whitespace is not empty: it is a record of one cell.
+- **Cells are not trimmed**, and no cell is treated as a comment.
+  Records may have different lengths.
+- **No BOM handling.** The decoder already removed a BOM that matches
+  the encoding.
+
 ## TypeScript surface
 
 For 0007 to implement in `src/core/`. Names are a suggestion; behavior
@@ -278,3 +305,28 @@ written `(i, e)` is integer `i` at exponent `e`.
 The `\|` are table escapes; each is a single `|` (U+007C). The labels
 these inputs hash to are in the test vectors in [LABELS.md](LABELS.md)
 (0005).
+
+### CSV grammar
+
+Delimiter `,`. Each output is the list of records, each a list of cells.
+`⏎` is LF and `␍` is CR in the inputs.
+
+| Input | Records |
+|---|---|
+| `a,b,c` | `[a][b][c]` |
+| `"a ""q"" b",c` | `[a "q" b][c]` |
+| `"x,y",z` | `[x,y][z]` |
+| `"line1␍⏎line2",z` | `[line1␍⏎line2][z]` |
+| `5" PIZZA,1` | `[5" PIZZA][1]` |
+| `"abc"def,1` | `["abc"def][1]` |
+| `a, "b" ,c` | `[a][ "b" ][c]` |
+| `"",x` | `[][x]` |
+| `,,` | `[][][]` |
+| `  a  ,b` | `[  a  ][b]` |
+| U+FEFF`a,b` | `[`U+FEFF`a][b]` |
+| `#x,y` | `[#x][y]` |
+| `a,b,c⏎d` | `[a][b][c]`, `[d]` |
+| `a,b␍⏎c,d␍e,f⏎g,h` | `[a][b]`, `[c][d]`, `[e][f]`, `[g][h]` |
+| `a,b⏎⏎⏎c,d⏎` | `[a][b]`, `[c][d]` |
+| `a⏎   ⏎b` | `[a]`, `[   ]`, `[b]` |
+| `a,"b⏎c,d` | Error: unterminated quote |

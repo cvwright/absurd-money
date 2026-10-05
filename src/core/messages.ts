@@ -434,16 +434,23 @@ export interface RulesDoc {
 
 export type Column = string | number;
 
+/** WHATWG Encoding Standard canonical names a profile may name. */
+export const PROFILE_ENCODINGS = ['utf-8', 'utf-16le', 'utf-16be', 'windows-1252'] as const;
+export type ProfileEncoding = (typeof PROFILE_ENCODINGS)[number];
+
 export interface Profile {
   readonly delimiter: string;
   readonly decimal?: '.' | ',';
+  readonly encoding?: ProfileEncoding;
   readonly skip_rows: number;
+  readonly skip_end_rows?: number;
   readonly header: boolean;
   readonly date: { readonly column: Column; readonly format: string };
   readonly amount:
     | { readonly column: Column; readonly negate: boolean }
     | { readonly debit: Column; readonly credit: Column };
   readonly description: { readonly column: Column };
+  readonly memo?: { readonly column: Column };
   readonly fitid?: { readonly column: Column };
   readonly pending?: { readonly column: Column; readonly value: string };
   readonly exp: number;
@@ -548,14 +555,14 @@ export const decodeRulesDoc: Decoder<RulesDoc> = versioned(
   object({ v: v1, rev, rules: arrayOf(rule, { uniqueBy: (r) => r.id }) }),
 );
 
-const DATE_FORMAT_TOKEN = /YYYY|MM|DD|M|D|[^A-Za-z0-9]/g;
+export const DATE_FORMAT_TOKEN = /YYYY|YY|MM|DD|M|D|[^A-Za-z0-9]/g;
 
-/** `format` is built from `YYYY`, `MM`, `DD`, `M`, `D`, and literal separators. */
+/** `format` is built from `YYYY`, `YY`, `MM`, `DD`, `M`, `D`, and literal separators. */
 function dateFormatProblem(format: string): string | undefined {
   const tokens = format.match(DATE_FORMAT_TOKEN) ?? [];
   if (tokens.join('') !== format) return 'unknown token in date format';
   const count = (xs: string[]) => tokens.filter((t) => xs.includes(t)).length;
-  if (count(['YYYY']) !== 1 || count(['MM', 'M']) !== 1 || count(['DD', 'D']) !== 1) {
+  if (count(['YYYY', 'YY']) !== 1 || count(['MM', 'M']) !== 1 || count(['DD', 'D']) !== 1) {
     return 'date format needs exactly one year, month, and day';
   }
   return undefined;
@@ -565,7 +572,13 @@ function profileDecoder(header: boolean): Decoder<Profile> {
   const column: Decoder<Column> = header ? nonEmptyString : count;
   return object(
     {
-      delimiter: refine(string, (d) => ([...d].length === 1 ? undefined : 'expected one character')),
+      delimiter: refine(string, (d) =>
+        [...d].length !== 1
+          ? 'expected one character'
+          : d === '"' || d === '\r' || d === '\n'
+            ? 'the delimiter cannot be a quote or a line break'
+            : undefined,
+      ),
       skip_rows: count,
       header: literal(header),
       date: object({ column, format: refine(nonEmptyString, dateFormatProblem) }),
@@ -578,6 +591,9 @@ function profileDecoder(header: boolean): Decoder<Profile> {
     },
     {
       decimal: oneOf(['.', ','] as const),
+      encoding: oneOf(PROFILE_ENCODINGS),
+      skip_end_rows: count,
+      memo: object({ column }),
       fitid: object({ column }),
       pending: object({ column, value: string }),
     },

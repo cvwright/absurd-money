@@ -16,8 +16,6 @@ Next ID: 0045
 
 ## Milestone 3: CSV import
 
-- [ ] [0020](issues/0020-csv-parsing.md) CSV parsing and mapping of
-      columns to fields (mapping profiles: see 0023)
 - [ ] 0021 Categorization rules stored in State
 - [ ] 0022 Staging review, matching against existing entries, and
       approval

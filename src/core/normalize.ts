@@ -30,9 +30,14 @@ export function normalizeDescription(s: string): string {
   return toWellFormed(s).normalize('NFKC').toLowerCase().replace(WS_RUN, ' ').replace(/^ | $/g, '');
 }
 
+/** Removes leading and trailing Unicode `White_Space`, the set above. */
+export function trimWhitespace(s: string): string {
+  return s.replace(WS_EDGES, '');
+}
+
 /** Well-formed and trimmed only. A `fitid` is an opaque token, so case is kept. */
 export function normalizeFitid(s: string): string {
-  return toWellFormed(s).replace(WS_EDGES, '');
+  return trimWhitespace(toWellFormed(s));
 }
 
 /** The row scheme: `{account}|{date}|{amount}|{description}|#{n}`. */

@@ -866,16 +866,61 @@ A **`Profile`**:
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `delimiter` | string | yes | One character. |
+| `delimiter` | string | yes | One character, not `"`, CR, or LF. |
 | `decimal` | string | no | `"."` (the default when absent) or `","`. The decimal separator in the amount column, for the parser in [AMOUNTS.md](AMOUNTS.md#parsing-text). |
-| `skip_rows` | number | yes | Lines to skip before the header or first row. |
+| `encoding` | string | no | The file's encoding, a WHATWG Encoding Standard canonical name: `"utf-8"` (the default when absent), `"utf-16le"`, `"utf-16be"`, or `"windows-1252"`. Never guessed at import time. See "Reading a file". |
+| `skip_rows` | number | yes | Physical lines to skip before the header or first row. |
+| `skip_end_rows` | number | no | Physical lines to skip at the end of the file, such as a totals line. Default 0. Trailing empty lines aren't counted. |
 | `header` | boolean | yes | Whether the first row after `skip_rows` names the columns. |
-| `date` | `{column, format}` | yes | `format` is built from `YYYY`, `MM`, `DD`, `M`, `D` and literal separators. |
-| `amount` | `{column, negate}` or `{debit, credit}` | yes | One signed column, with `negate: true` when the export shows charges as positive; or separate unsigned debit and credit columns. |
-| `description` | `{column}` | yes | |
+| `date` | `{column, format}` | yes | `format` is built from `YYYY`, `YY`, `MM`, `DD`, `M`, `D` and literal separators, with exactly one year, month, and day. `YY` is 20YY. `M` and `D` take one or two digits. A cell with anything else, such as a time of day, is an error. |
+| `amount` | `{column, negate}` or `{debit, credit}` | yes | One signed column, with `negate: true` when the export shows charges as positive; or separate debit and credit columns, where `debit` lowers the amount posted to the account. |
+| `description` | `{column}` | yes | The text hashed into the row scheme's `import/v1` label ([NORMALIZATION.md](NORMALIZATION.md)). Map it to whichever column best identifies the transaction. |
+| `memo` | `{column}` | no | A second text column, shown in review and available to import rules. Not part of the label: banks rewrite memo text between pending and posted. |
 | `fitid` | `{column}` | no | When present, the import ID uses the fitid scheme (0023). |
 | `pending` | `{column, value}` | no | Rows whose `column` equals `value` are skipped as pending. |
 | `exp` | `Exp` | yes | Exponent the file's amounts are parsed at. A cell with more non-zero fractional digits is an error, never rounded. The commodity is the account's `cur`. |
 
 A `column` is a header name (string) when `header` is true, and a
 0-based index (number) otherwise.
+
+#### Reading a file
+
+Decoding and CSV parsing feed the `import/v1` label, so both are pinned.
+The rest is client behavior, but every client must agree on which rows
+are imported. Issue 0020.
+
+1. **Decode** the bytes with `encoding` and `TextDecoder`'s `fatal:
+   true`. A file that isn't valid in that encoding fails, instead of
+   minting labels from U+FFFD. `windows-1252` accepts every byte, so a
+   file that is valid UTF-8 with non-ASCII bytes also fails under
+   `windows-1252`. A leading BOM is removed only when it matches the
+   encoding.
+2. **Skip** `skip_rows` physical lines from the start and
+   `skip_end_rows` from the end. CRLF, LF, and a lone CR each end a
+   line. Skipping happens before parsing, so a preamble or trailer needn't
+   be valid CSV.
+3. **Parse** with the grammar in "CSV grammar" in
+   [NORMALIZATION.md](NORMALIZATION.md).
+4. **Map** each record. With `header`, the first record names the
+   columns. Header cells are matched after trimming whitespace. A
+   column the profile uses that is missing, or that appears twice, fails
+   the import, and so does a row too short to contain one.
+
+Each row then has exactly one outcome, checked in this order:
+
+| Condition | Outcome |
+|---|---|
+| `pending` matches: the trimmed cell equals `value` exactly | Skipped as pending. |
+| Blank amount: the cell is empty or whitespace. With debit/credit, both cells are. | Skipped and reported. These are balance rows or continuations, never transactions. |
+| Debit and credit both non-empty, where a cell that parses to zero counts as empty | The import fails. |
+| The amount is zero | Skipped and reported. A split can't be zero. |
+| The amount or date doesn't parse | The import fails, citing the line. A trailer belongs in `skip_end_rows`. |
+| `fitid` profile, and the `fitid` cell is empty after `normalizeFitid` | Flagged for manual entry and never imported. It can't fall back to the row scheme (0023). |
+| `fitid` profile, and the `fitid` repeats an earlier row's in the same file | The import fails. |
+| Otherwise | Imported. |
+
+The amount is the cell parsed with `parseDecimal` at `exp`, then
+negated when `negate` is set. With debit/credit, the sign written in
+either cell is ignored: the amount is credit minus debit. The result is
+the signed amount as posted to the account, which goes into the label's
+canonical form.

@@ -236,6 +236,15 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The projection staying decrypted in OPFS is documented and accepted,
   not fixed. The device's disk encryption is assumed; see "Design A" in
   the design doc (0043).
+- CSV parsing and column mapping in the core (0020). Import profiles
+  gained `encoding` (never guessed; decoded with `fatal: true`, and
+  UTF-8 under `windows-1252` is refused), `skip_end_rows` for trailers,
+  an optional `memo` column kept out of the label, and the `YY` date
+  token. The CSV grammar is pinned under `import/v1` with test vectors
+  in NORMALIZATION.md, implemented with `csv-parse` pinned at 7.0.3.
+  SCHEMAS.md defines every row's outcome: pending, blank, and zero rows
+  are skipped and reported, a blank `fitid` is flagged for manual entry,
+  and a bad date or amount fails the import.
 
 ### Changed
 

@@ -80,6 +80,24 @@ export default tseslint.config(
     },
   },
   {
+    // The pinned CSV grammar (design/NORMALIZATION.md) wraps csv-parse, pinned to an exact
+    // version. This one module may import it; the rest of core goes through parseCsv.
+    files: ['src/core/csv.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: '^(?!\\.{1,2}/|@/core/|@noble/hashes/|csv-parse/browser/esm/sync$).*',
+              message: 'src/core/csv.ts may import only core modules, @noble/hashes, and csv-parse/browser/esm/sync.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Core tests may also import vitest.
     files: ['src/core/**/*.test.ts'],
     rules: {
