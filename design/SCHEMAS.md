@@ -324,7 +324,8 @@ message still applies. The client keeps each message under the server's
 Post-time: each edit passes the fold-time rules against its target's
 effective fields; the target is not reversed in any segment if the edit
 moves a split; no split moves to a closed account; `payee`, if set,
-exists in `ledger/payees`; the target's segment is open.
+exists in `ledger/payees`; no label in `import_ids` is already
+consumed; the target's segment is open.
 
 ### `ledger.dismiss`
 
@@ -345,6 +346,9 @@ Marks import rows as handled without posting an entry.
 A dismissal is for rows that should be ignored, such as a pending charge
 that never posted, and for matches that can't be recorded as an edit
 because the matched split's segment is frozen.
+
+Post-time: no label is already consumed; the segment is open. A client
+packs dismissals by year and keeps each message under the size limit.
 
 ### Import consumption and matching
 

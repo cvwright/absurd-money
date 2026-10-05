@@ -8,7 +8,7 @@ import { foldSegment, type RawMessage } from '@/core/fold/segment.js';
 import { stringifyJson } from '@/core/json.js';
 import type { MsgId } from '@/core/ids.js';
 import { encodeState } from '@/core/messages.js';
-import { A, accountsDoc, budgetDoc, day, E, entry, msg, usd } from '@/core/testing.js';
+import { A, accountsDoc, budgetDoc, day, E, entry, lbl, msg, usd } from '@/core/testing.js';
 import { Projection, PROJECTION_VERSION, type LogMessage } from './projection.js';
 
 const USD = commodity('USD');
@@ -291,6 +291,44 @@ describe('Projection', () => {
     ]);
     // Both still fold.
     expect(cents(p, A.checking)).toBe(900n);
+  });
+
+  it('derives consumed import labels from splits, edits, and dismissals in any segment', () => {
+    const p = Projection.open(memoryDb());
+    p.append('state', stateWith());
+    const [a, b, c, d] = [lbl('a'), lbl('b'), lbl('c'), lbl('d')];
+    const old = chain(500);
+    p.append('journal-2025', [
+      old('o1', 'ledger.entry', entry('2025-12-30', [usd(A.checking, -900, { import_id: a }), usd(A.groceries, 900)])),
+    ]);
+    const j = chain();
+    const hand = j('hand', 'ledger.entry', entry('2026-01-02', [usd(A.checking, -500), usd(A.dining, 500)]));
+    p.append('journal-2026', [hand, j('dis', 'ledger.dismiss', { v: 1, import_ids: [b] })]);
+    expect(p.consumed([a, b, c, d])).toEqual(new Set([a, b]));
+    expect(p.editTarget(hand.hash as MsgId)!.importIds).toEqual([undefined, undefined]);
+
+    // A match: the hand-entered entry's checking split is the row `c`.
+    p.append('journal-2026', [j('match', 'ledger.edit', { v: 1, edits: [{ target: hand.hash, import_ids: { '0': c } }] })]);
+    expect(p.consumed([a, b, c, d])).toEqual(new Set([a, b, c]));
+    expect(p.editTarget(hand.hash as MsgId)!.importIds).toEqual([c, undefined]);
+    expect(p.anomalies()).toEqual([]);
+
+    // `a` again, in another segment, and `b` both dismissed and on a split.
+    const again = j('again', 'ledger.entry', entry('2026-01-03', [
+      usd(A.checking, -900, { import_id: a }), usd(A.groceries, 900, { import_id: b }),
+    ]));
+    p.append('journal-2026', [again]);
+    expect(p.anomalies()).toEqual([
+      { topic: 'journal-2026', kind: 'import-id-reused', msg: again.hash, detail: `import label ${a} is used 2 times` },
+      { topic: 'journal-2026', kind: 'import-id-reused', msg: again.hash, detail: `import label ${b} is used 2 times` },
+    ]);
+    // Twice dismissed is no anomaly.
+    const q = Projection.open(memoryDb());
+    q.append('state', stateWith());
+    const k = chain();
+    q.append('journal-2026', [k('d1', 'ledger.dismiss', { v: 1, import_ids: [d] }), k('d2', 'ledger.dismiss', { v: 1, import_ids: [d] })]);
+    expect(q.anomalies()).toEqual([]);
+    expect(q.consumed([d])).toEqual(new Set([d]));
   });
 
   it('locks entries at or before a checkpoint head', () => {

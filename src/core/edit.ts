@@ -9,7 +9,7 @@
  */
 
 import { isNominal, type Chart } from './chart.js';
-import { segmentOf, type AccountId, type BlobRef, type MsgId, type PayeeId } from './ids.js';
+import { segmentOf, type AccountId, type BlobRef, type Label, type MsgId, type PayeeId } from './ids.js';
 import { stringifyJson } from './json.js';
 import { encodeMessage, type Edit, type EditMessage, type PayeesDoc } from './messages.js';
 import type { ReversalTarget } from './reversal.js';
@@ -22,6 +22,8 @@ export interface EditTarget extends ReversalTarget {
   readonly memo?: string;
   readonly payee?: PayeeId;
   readonly receipts: readonly BlobRef[];
+  /** Effective `import_id` of each split. */
+  readonly importIds: readonly (Label | undefined)[];
 }
 
 /** The fields an edit sets, as the user left them. Absent fields are kept. */
@@ -73,6 +75,8 @@ export interface EditPostContext {
   readonly payees?: PayeesDoc;
   /** The entry `edit.target` names, or undefined if the client holds no such entry. */
   readonly target: EditTarget | undefined;
+  /** Every consumed import label. Needed to post an edit that sets `import_ids`. */
+  readonly consumed?: ReadonlySet<Label>;
 }
 
 /**
@@ -84,14 +88,16 @@ export function editPostProblems(edit: Edit, ctx: EditPostContext): string[] {
   const { target, chart } = ctx;
   if (!target || target.id !== edit.target) return ['the edited message is not a known entry'];
   const problems: string[] = [];
-  // Matching import rows posts `import_ids` (0023); nothing knows the effective labels yet.
-  if (edit.import_ids) problems.push('import matches are not supported yet');
+  for (const [k, label] of Object.entries(edit.import_ids ?? {})) {
+    if (!ctx.consumed) problems.push('import matches need the consumed import labels');
+    else if (ctx.consumed.has(label)) problems.push(`split ${k}: import row already consumed`);
+  }
   const problem = editProblem(
     edit,
     {
       splits: target.splits,
       accounts: target.accounts,
-      importIds: target.splits.map(() => undefined),
+      importIds: target.importIds,
       locked: target.locked,
       reversed: target.reversedBy !== undefined,
     },

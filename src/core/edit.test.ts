@@ -4,7 +4,7 @@ import { canRecategorize, editOf, editPostProblems, packEdits, type EditTarget }
 import { foldSegment } from './fold/segment.js';
 import type { BlobRef, BlobId, PayeeId } from './ids.js';
 import { decodePayeesDoc, encodeMessage, type Edit, type Split } from './messages.js';
-import { A, acct, chart, day, msg, usd } from './testing.js';
+import { A, acct, chart, day, lbl, msg, usd } from './testing.js';
 
 const USD = commodity('USD');
 const split = (account: Split['account'], amount: bigint): Split => ({ account, amount, exp: 2, cur: USD });
@@ -23,6 +23,7 @@ const target: EditTarget = {
   memo: 'market',
   payee: payee('shop'),
   receipts: [receipt('one')],
+  importIds: [undefined, undefined, undefined],
 };
 
 const payees = decodePayeesDoc(
@@ -93,13 +94,25 @@ describe('editPostProblems', () => {
     }
   });
 
-  it('refuses an unknown payee, a frozen segment, and import matches', () => {
+  it('refuses an unknown payee and a frozen segment', () => {
     expect(editPostProblems({ target: target.id, payee: payee('nobody') }, ctx)).toEqual(['unknown payee']);
     expect(editPostProblems({ target: target.id, payee: payee('nobody') }, { ...ctx, payees: undefined })).toEqual([]);
     expect(editPostProblems({ target: target.id, memo: 'x' }, { ...ctx, target: { ...target, segmentOpen: false } }))
       .toEqual(['journal-2026 is frozen']);
-    expect(editPostProblems({ target: target.id, import_ids: { '0': 'Xk2mP9qR4tV7wY1zA3bC' as never } }, ctx))
-      .toEqual(['import matches are not supported yet']);
+  });
+
+  it('sets an import label only on an unconfirmed split, and only if the row is unconsumed', () => {
+    const row = lbl('row');
+    const match: Edit = { target: target.id, import_ids: { '0': row } };
+    expect(editPostProblems(match, { ...ctx, consumed: new Set() })).toEqual([]);
+    expect(editPostProblems(match, ctx)).toEqual(['import matches need the consumed import labels']);
+    expect(editPostProblems(match, { ...ctx, consumed: new Set([row]) })).toEqual(['split 0: import row already consumed']);
+    const confirmed = { ...target, importIds: [lbl('earlier'), undefined, undefined] };
+    expect(editPostProblems(match, { ...ctx, target: confirmed, consumed: new Set() }))
+      .toEqual(['split 0 already has an import_id']);
+    // Labels may be set on a locked, reversed entry in an open segment: no balance changes.
+    const locked = { ...target, locked: true, reversedBy: msg('rev') };
+    expect(editPostProblems(match, { ...ctx, target: locked, consumed: new Set() })).toEqual([]);
   });
 
   it('agrees with the fold on what applies', () => {

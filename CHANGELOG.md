@@ -253,6 +253,14 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `src/core/rules.ts` matches, chooses, and edits rules and checks a
   rewrite. `LedgerSpace` loads and rewrites the document, checking new
   or changed rules against the chart and payees.
+- Import idempotency (0023). Each statement row gets an `import/v1`
+  label, either from its `fitid` or from its date, amount, normalized
+  description, and occurrence count within that date. Rows already
+  consumed, by a split's `import_id` or a `ledger.dismiss`, are dropped
+  before review. The projection tracks consumed labels across segments
+  and reports a label used twice. `LedgerSpace` labels rows, posts
+  dismissals, and refuses an entry or a match that would reuse a
+  consumed label.
 
 ### Changed
 

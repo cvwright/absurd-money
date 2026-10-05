@@ -2,7 +2,7 @@
  * Reading a CSV statement with an account's import profile: decoding the bytes, skipping
  * lines, and mapping records to rows. Spec: "Reading a file" under `ledger/import-profiles`
  * in design/SCHEMAS.md (0020). Decoding and the CSV grammar feed `import/v1` labels and
- * are pinned; the label itself is computed in normalize.ts (0023).
+ * are pinned; the labels themselves are computed in import-ids.ts (0023).
  */
 
 import { isZero, neg, parseDecimal, type Decimal } from './amount.js';

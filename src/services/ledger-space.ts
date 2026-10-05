@@ -3,12 +3,14 @@
  *
  * One set of books is one reeeductio space. This wraps the SDK's `Space` with the
  * ledger's operations. For now that is authentication, the chart of accounts
- * (`ledger/accounts`), the owner's password (0033), the budget document (`ledger/budget`), the list of journal years
- * (`ledger/journal`), the payee list (`ledger/payees`), the import rules (`ledger/rules`), posting entries, reversals, and edits to the journal, period
- * closes to `checkpoints`, statement reconciliations to `recon`, receipts as
- * encrypted blobs, reading a journal segment, and fetching and decrypting messages for the
- * sync (sync.ts); the other State documents come in later issues. A post that loses the
- * race for its topic's chain is retried against the new head (topic-append.ts).
+ * (`ledger/accounts`), the owner's password (0033), the budget document
+ * (`ledger/budget`), the list of journal years (`ledger/journal`), the payee list
+ * (`ledger/payees`), the import rules (`ledger/rules`), the `import/v1` labels of
+ * statement rows (0023), posting entries, reversals, edits, and dismissals to the
+ * journal, period closes to `checkpoints`, statement reconciliations to `recon`, receipts
+ * as encrypted blobs, reading a journal segment, and fetching and decrypting messages for
+ * the sync (sync.ts); the other State documents come in later issues. A post that loses
+ * the race for its topic's chain is retried against the new head (topic-append.ts).
  */
 
 import { ChainError, decodeUrlSafeBase64, NotFoundError, Space, type Message } from 'reeeductio';
@@ -18,10 +20,15 @@ import { chartOf, chartUpdateProblems, EMPTY_CHART, type Chart } from '@/core/ch
 import { closePostProblems, periodClose, periodYear } from '@/core/close.js';
 import { CodecError } from '@/core/errors.js';
 import type { RawMessage } from '@/core/fold/segment.js';
+import type { ImportRow } from '@/core/csv-import.js';
 import { editPostProblems, packEdits, type EditTarget } from '@/core/edit.js';
-import { base64url, isBlobId, newPayeeId, segmentOf, yearOf, type BlobRef, type MsgId, type PayeeId } from '@/core/ids.js';
+import {
+  base64url, isBlobId, newPayeeId, segmentOf, yearOf, type AccountId, type BlobRef, type Label, type MsgId, type PayeeId,
+} from '@/core/ids.js';
+import { dismissPostProblems, labelRows, packDismissals, type DismissRow, type LabeledRow } from '@/core/import-ids.js';
 import { EMPTY_JOURNAL, journalUpdateProblems, withYear } from '@/core/journal.js';
 import { parseJsonBytes } from '@/core/json.js';
+import { deriveLabelKeys, type LabelKeys } from '@/core/labels.js';
 import {
   encodeMessage, isStatePath, TOPIC_TYPES, type AccountsDoc, type BudgetDoc, type Edit, type Entry,
   type MessageTypes, type PayeesDoc, type Recon, type Reversal, type RulesDoc,
@@ -92,7 +99,7 @@ export function rulesSpec(chart: Chart, payees: PayeesDoc): DocSpec<'ledger/rule
   };
 }
 
-/** An entry, reversal, edit, close, or reconciliation broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
+/** An entry, reversal, edit, dismissal, close, or reconciliation broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
 export class InvalidEntryError extends Error {
   constructor(readonly problems: readonly string[]) {
     super(problems.join('; '));
@@ -107,6 +114,8 @@ export class LedgerSpace {
   private authPromise: Promise<void> | null = null;
   /** Years seen listed in `ledger/journal`. Years are never removed, so this never goes stale. */
   private readonly listedYears = new Set<number>();
+  /** The label keys, derived once from the space's root and dropped with this object. */
+  private readonly labelKeys: LabelKeys;
 
   constructor(creds: SpaceCredentials) {
     this.space = new Space({
@@ -116,6 +125,7 @@ export class LedgerSpace {
       baseUrl: creds.baseUrl,
       fetch: fetch.bind(window),
     });
+    this.labelKeys = deriveLabelKeys(creds.symmetricRoot, creds.spaceId);
     this.state = sdkStateBackend(this.space, () => this.authenticate());
     this.topics = sdkTopicBackend(this.space, () => this.authenticate());
   }
@@ -220,6 +230,11 @@ export class LedgerSpace {
     return updateDoc(this.state, rulesSpec(chartOf(accounts), payees), edit);
   }
 
+  /** Each row of a statement imported into `account`, with its `import/v1` label (0023). */
+  labelRows(rows: readonly ImportRow[], account: AccountId): LabeledRow[] {
+    return labelRows(rows, account, this.labelKeys);
+  }
+
   /** The years that have a `journal-YYYY` segment, ascending. */
   async loadJournalYears(): Promise<readonly number[]> {
     const { years } = await loadDoc(this.state, JOURNAL);
@@ -231,20 +246,31 @@ export class LedgerSpace {
    * Posts `entry` to the `journal-YYYY` segment of its date, after checking it against
    * the post-time rules with the latest chart and payee list. `segmentOpen` says whether
    * that segment is open (`Projection.segmentOpen`). An entry with `replaces` needs `replaced`,
-   * the entry it names (`Projection.reversalTarget`). Returns the new message's ID.
+   * the entry it names (`Projection.reversalTarget`). An entry whose splits carry
+   * `import_id`s needs `consumed`, which of those labels are consumed
+   * (`Projection.consumed`). Returns the new message's ID.
    *
    * If another message lands on the segment first, the post is retried against the new
    * head. Nothing in the rules depends on the segment's other messages, so the entry is
    * not checked again.
    */
-  async postEntry(entry: Entry, segmentOpen: boolean, replaced?: ReversalTarget): Promise<MsgId> {
+  async postEntry(
+    entry: Entry,
+    segmentOpen: boolean,
+    replaced?: ReversalTarget,
+    consumed?: ReadonlySet<Label>,
+  ): Promise<MsgId> {
     const [chart, payees] = await Promise.all([
       this.loadAccounts().then(chartOf),
       entry.payee ? this.loadPayees() : undefined,
     ]);
     const problems = entryPostProblems(entry, {
       chart, segmentOpen, ...(payees && { payees }), ...(replaced && { replaced }),
+      ...(consumed && { isConsumed: (l: Label) => consumed.has(l) }),
     });
+    if (!consumed && entry.splits.some((s) => s.import_id !== undefined)) {
+      problems.push('import rows need the consumed import labels');
+    }
     if (problems.length > 0) throw new InvalidEntryError(problems);
     return this.postToSegment(yearOf(entry.date), 'ledger.entry', entry);
   }
@@ -269,26 +295,54 @@ export class LedgerSpace {
   /**
    * Posts `edits` as `ledger.edit` messages, each to its target's segment, after checking
    * every edit against the post-time rules with the latest chart and payee list. `targets`
-   * holds each edited entry as the projection holds it (`Projection.editTarget`). Nothing is posted unless every edit passes. Returns the new
+   * holds each edited entry as the projection holds it (`Projection.editTarget`). Edits
+   * that set `import_ids` need `consumed`, which of those labels are consumed
+   * (`Projection.consumed`). Nothing is posted unless every edit passes. Returns the new
    * messages' IDs.
    *
    * Edits in one message stand or fall separately, and so do messages: if a post fails,
    * the ones before it stay posted. Like `postEntry`, a post that loses the race for the
    * segment is retried.
    */
-  async postEdits(edits: readonly Edit[], targets: ReadonlyMap<MsgId, EditTarget>): Promise<MsgId[]> {
+  async postEdits(
+    edits: readonly Edit[],
+    targets: ReadonlyMap<MsgId, EditTarget>,
+    consumed?: ReadonlySet<Label>,
+  ): Promise<MsgId[]> {
     const [chart, payees] = await Promise.all([
       this.loadAccounts().then(chartOf),
       edits.some((e) => e.payee) ? this.loadPayees() : undefined,
     ]);
     const problems = edits.flatMap((e) =>
-      editPostProblems(e, { chart, target: targets.get(e.target), ...(payees && { payees }) }),
+      editPostProblems(e, { chart, target: targets.get(e.target), ...(payees && { payees }), ...(consumed && { consumed }) }),
     );
     if (problems.length > 0) throw new InvalidEntryError(problems);
     const ids: MsgId[] = [];
     for (const { year, msg } of packEdits(edits, (t) => targets.get(t)!.year)) {
       ids.push(await this.postToSegment(year, 'ledger.edit', msg));
     }
+    return ids;
+  }
+
+  /**
+   * Dismisses import rows (0023): posts `ledger.dismiss` messages to the segment of each
+   * row's year, after checking that no row is consumed (`Projection.consumed`) and that
+   * each segment is open (`Projection.segmentOpen`). Nothing is posted unless every
+   * message passes. Returns the new messages' IDs.
+   *
+   * Like `postEdits`, if a post fails, the ones before it stay posted.
+   */
+  async postDismissals(
+    rows: readonly DismissRow[],
+    ctx: { consumed: ReadonlySet<Label>; segmentOpen: (year: number) => boolean },
+  ): Promise<MsgId[]> {
+    const msgs = packDismissals(rows);
+    const problems = msgs.flatMap(({ year, msg }) =>
+      dismissPostProblems(msg, { consumed: ctx.consumed, segmentOpen: ctx.segmentOpen(year), year }),
+    );
+    if (problems.length > 0) throw new InvalidEntryError(problems);
+    const ids: MsgId[] = [];
+    for (const { year, msg } of msgs) ids.push(await this.postToSegment(year, 'ledger.dismiss', msg));
     return ids;
   }
 

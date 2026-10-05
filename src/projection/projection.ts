@@ -29,7 +29,9 @@ import { CodecError } from '@/core/errors.js';
 import { foldBudget } from '@/core/fold/budget.js';
 import { balances as foldBalances, type Balances, type BalanceWindow } from '@/core/fold/ledger.js';
 import { foldSegment, type Anomaly, type AnomalyKind, type RawMessage } from '@/core/fold/segment.js';
-import { segmentOf, segmentYear, type AccountId, type BlobRef, type EnvelopeId, type IsoDate, type MsgId, type PayeeId } from '@/core/ids.js';
+import {
+  segmentOf, segmentYear, type AccountId, type BlobRef, type EnvelopeId, type IsoDate, type Label, type MsgId, type PayeeId,
+} from '@/core/ids.js';
 import { EMPTY_JOURNAL } from '@/core/journal.js';
 import { parseJson } from '@/core/json.js';
 import {
@@ -44,7 +46,7 @@ import { isInverse, type ReversalTarget } from '@/core/reversal.js';
 export const LOG_VERSION = 1;
 
 /** The fold tables' schema and meaning. Changing it means refolding from the log. */
-export const PROJECTION_VERSION = 4;
+export const PROJECTION_VERSION = 5;
 
 /** The topics the projection replays, besides the `journal-YYYY` segments. */
 export const FIXED_TOPICS = ['state', 'checkpoints', 'budget', 'recon'] as const;
@@ -230,10 +232,18 @@ const FOLD_SCHEMA = `
     exp INTEGER NOT NULL,
     cur TEXT NOT NULL,
     approx REAL NOT NULL,
+    import_id TEXT,
     PRIMARY KEY (txn, split)
   ) STRICT;
   CREATE INDEX postings_account ON postings (account);
   CREATE INDEX postings_topic ON postings (topic);
+  CREATE INDEX postings_import_id ON postings (import_id) WHERE import_id IS NOT NULL;
+  CREATE TABLE dismissed (
+    topic TEXT NOT NULL,
+    msg TEXT NOT NULL,
+    label TEXT NOT NULL
+  ) STRICT;
+  CREATE INDEX dismissed_label ON dismissed (label);
   CREATE TABLE balances (
     topic TEXT NOT NULL,
     account TEXT NOT NULL,
@@ -278,7 +288,7 @@ const FOLD_SCHEMA = `
 `;
 
 /** The tables holding one topic's fold, cleared before it is refolded. */
-const PER_TOPIC_TABLES = ['folds', 'txns', 'postings', 'balances', 'anomalies'];
+const PER_TOPIC_TABLES = ['folds', 'txns', 'postings', 'balances', 'dismissed', 'anomalies'];
 
 interface LogRow {
   hash: string;
@@ -570,8 +580,8 @@ export class Projection {
   /**
    * Refolds a segment. The fold always runs over the whole segment, but with `touched`
    * only those transactions' rows in this segment are rewritten: when messages are
-   * appended and nothing else changed, no other row can differ. Balances, anomalies, and
-   * the halt are small and always rewritten.
+   * appended and nothing else changed, no other row can differ. Balances, dismissals,
+   * anomalies, and the halt are small and always rewritten.
    */
   private refoldSegment(topic: string, touched?: ReadonlySet<string>): void {
     const rows = this.logRows(topic);
@@ -584,7 +594,7 @@ export class Projection {
     });
 
     if (touched) {
-      for (const t of ['folds', 'balances', 'anomalies']) {
+      for (const t of ['folds', 'balances', 'dismissed', 'anomalies']) {
         this.db.exec({ sql: `DELETE FROM ${t} WHERE topic = ?`, bind: [topic] });
       }
       // Scoped to this topic: an edit naming an entry in another segment is ignored, and
@@ -607,8 +617,9 @@ export class Projection {
 
     const txns: BindableValue[][] = [];
     const postings: BindableValue[][] = [];
-    const posting = (txn: MsgId, split: number, account: AccountId, a: { amount: bigint; exp: number; cur: Commodity }) =>
-      postings.push([txn, split, topic, account, String(a.amount), a.exp, a.cur, approx(a)]);
+    const posting = (
+      txn: MsgId, split: number, account: AccountId, a: { amount: bigint; exp: number; cur: Commodity }, importId?: Label,
+    ) => postings.push([txn, split, topic, account, String(a.amount), a.exp, a.cur, approx(a), importId ?? null]);
 
     for (const e of fold.entries.values()) {
       if (!write(e.id)) continue;
@@ -616,7 +627,7 @@ export class Projection {
         e.id, topic, e.index, 'entry', e.entry.date, ts.get(e.id)!, e.payee ?? null, e.memo ?? null,
         null, e.entry.replaces ?? null, e.receipts.length > 0 ? JSON.stringify(e.receipts) : null,
       ]);
-      e.entry.splits.forEach((s, i) => posting(e.id, i, e.accounts[i], s));
+      e.entry.splits.forEach((s, i) => posting(e.id, i, e.accounts[i], s, e.importIds[i]));
     }
     for (const r of fold.reversals.values()) {
       if (!write(r.id)) continue;
@@ -637,8 +648,12 @@ export class Projection {
       txns,
     );
     this.insertMany(
-      'INSERT INTO postings (txn, split, topic, account, amount, exp, cur, approx) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO postings (txn, split, topic, account, amount, exp, cur, approx, import_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       postings,
+    );
+    this.insertMany(
+      'INSERT INTO dismissed (topic, msg, label) VALUES (?, ?, ?)',
+      fold.dismissals.flatMap(({ id, msg }) => msg.import_ids.map((label) => [topic, id, label])),
     );
 
     const bals: BindableValue[][] = [];
@@ -802,8 +817,12 @@ export class Projection {
     const base = this.reversalTarget(id);
     if (!base) return undefined;
     const t = this.db.selectObject('SELECT topic, payee, memo, receipts FROM txns WHERE id = ?', [id])!;
+    const importIds = this.db
+      .selectValues('SELECT import_id FROM postings WHERE txn = ? ORDER BY split', [id])
+      .map((v) => (v === null ? undefined : (v as Label)));
     return {
       ...base,
+      importIds,
       year: segmentYear(t.topic as string)!,
       ...(t.memo !== null && { memo: t.memo as string }),
       ...(t.payee !== null && { payee: t.payee as PayeeId }),
@@ -935,7 +954,28 @@ export class Projection {
     return out;
   }
 
-  /** Every topic's fold anomalies, and the reversal anomalies that span segments. */
+  /**
+   * Which of `labels` are consumed: the effective `import_id` of some entry's split, or
+   * cited by a `ledger.dismiss`, in any segment held. Reversal splits never carry one.
+   */
+  consumed(labels: readonly Label[]): Set<Label> {
+    const out = new Set<Label>();
+    // Well under SQLite's limit on bound parameters.
+    const CHUNK = 500;
+    for (let i = 0; i < labels.length; i += CHUNK) {
+      const chunk = labels.slice(i, i + CHUNK);
+      const marks = chunk.map(() => '?').join(', ');
+      const rows = this.db.selectValues(
+        `SELECT import_id FROM postings WHERE import_id IN (${marks})
+         UNION SELECT label FROM dismissed WHERE label IN (${marks})`,
+        [...chunk, ...chunk],
+      );
+      for (const v of rows) out.add(v as Label);
+    }
+    return out;
+  }
+
+  /** Every topic's fold anomalies, and the reversal and import anomalies that span segments. */
   anomalies(): TopicAnomaly[] {
     const folded = this.db.selectObjects('SELECT topic, msg, kind, detail, edit FROM anomalies').map((r) => ({
       topic: r.topic as string,
@@ -944,7 +984,35 @@ export class Projection {
       detail: r.detail as string,
       ...(r.edit !== null && { edit: r.edit as number }),
     }));
-    return [...folded, ...this.reversalAnomalies()];
+    return [...folded, ...this.reversalAnomalies(), ...this.importAnomalies()];
+  }
+
+  /**
+   * A label that is the effective `import_id` of two splits, or of a split and a
+   * dismissal, as core's `importConsumption` defines it. The uses may be in different
+   * segments. Reported against the last use, by segment and chain position.
+   */
+  private importAnomalies(): TopicAnomaly[] {
+    const rows = this.db.selectObjects(
+      `WITH uses AS (
+         SELECT p.import_id AS label, 1 AS split, t.topic, t.idx, t.id AS msg FROM postings p
+           JOIN txns t ON t.id = p.txn WHERE p.import_id IS NOT NULL
+         UNION ALL
+         SELECT d.label, 0, d.topic, l.pos, d.msg FROM dismissed d
+           JOIN log l ON l.topic = d.topic AND l.hash = d.msg
+       )
+       SELECT label, count(*) AS n,
+              (SELECT u2.topic FROM uses u2 WHERE u2.label = u.label ORDER BY u2.topic DESC, u2.idx DESC LIMIT 1) AS topic,
+              (SELECT u2.msg FROM uses u2 WHERE u2.label = u.label ORDER BY u2.topic DESC, u2.idx DESC LIMIT 1) AS msg
+       FROM uses u GROUP BY label HAVING sum(split) > 1 OR (sum(split) = 1 AND count(*) > 1)
+       ORDER BY label`,
+    );
+    return rows.map((r) => ({
+      topic: r.topic as string,
+      kind: 'import-id-reused' as const,
+      msg: r.msg as MsgId,
+      detail: `import label ${r.label as string} is used ${r.n as number} times`,
+    }));
   }
 
   /**

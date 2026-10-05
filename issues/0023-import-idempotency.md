@@ -102,3 +102,29 @@ by account ID.
 - Two identical same-day rows post two entries.
 - A test suite covers the cases above, plus a pending row that later
   changes.
+
+## Resolution
+
+2026-10-05. Done as proposed, ahead of 0022, which needs it to post
+anything. `src/core/import-ids.ts` computes each row's label
+(`importInputs`, `labelRows`), with `n` counted per date, amount by
+value, and normalized description, and refuses a file that mixes the
+two schemes. It also drops consumed rows (`freshRows`), and packs
+`ledger.dismiss` messages by year (`packDismissals`) and checks them
+(`dismissPostProblems`). The acceptance cases are tested end to end,
+from CSV bytes through the segment fold, in `import-ids.test.ts`.
+
+The projection keeps each split's effective `import_id` and every
+dismissed label (`PROJECTION_VERSION` 5). `Projection.consumed` answers
+which of a file's labels are consumed in any segment, and labels used
+twice across segments are reported as `import-id-reused`.
+`LedgerSpace` derives the label keys once per session and labels rows
+(`labelRows`). It also posts dismissals (`postDismissals`) and checks
+`import_id`s against the consumed set when posting entries and edits.
+`EditTarget` carries the effective `import_id`s, so the post-time
+"import matches are not supported yet" refusal is gone.
+
+SCHEMAS.md gained post-time rules for `ledger.dismiss` and for
+`import_ids` edits. The pending-row case is left to review, as the
+issue says: matching, "this replaces the pending one", and uploading
+the source file belong to 0022.

@@ -16,11 +16,8 @@ Next ID: 0047
 
 ## Milestone 3: CSV import
 
-- [ ] 0022 Staging review, matching against existing entries, and
-      approval
-- [ ] [0023](issues/0023-import-idempotency.md) Idempotency via
-      `import_id` labels; consumption derived, dismissal via
-      `ledger.dismiss`
+- [ ] [0022](issues/0022-staging-review.md) Staging review, matching
+      against existing entries, and approval, with the profile editor
 
 ## Milestone 4: Envelope budgeting
 
