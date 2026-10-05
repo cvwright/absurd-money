@@ -11,8 +11,9 @@
  * reconciliation can be redone: that posts a recon that supersedes it, starting from what
  * it cleared.
  *
- * The ticked list lives only in this view, so leaving the page drops it. Keeping it across
- * visits is 0019.
+ * The session in progress, the ticked list with the statement's date and balance, is kept
+ * per account in this device's local storage (0019), so leaving the page or reloading
+ * doesn't drop it. It is never posted; finishing or cancelling a redo clears it.
  */
 
 import { LitElement, html, css, nothing } from 'lit';
@@ -27,6 +28,7 @@ import { clearedBalance, lastRecon } from '@/core/recon.js';
 import type { ProjectionClient } from '@/projection/client.js';
 import type { Reconciliation, RegisterLine } from '@/projection/projection.js';
 import type { LedgerSpace } from '@/services/ledger-space.js';
+import { ReconSessions } from '@/services/recon-session.js';
 import { today } from './dates.js';
 import { amountOf, comparePaths, errorMessage, formatAmount, shownAs } from './forms.js';
 
@@ -336,6 +338,8 @@ export class ReconcileView extends LitElement {
 
   /** Counts queries, so a slow answer for an account no longer shown is dropped. */
   private generation = 0;
+  /** This device's sessions in progress, opened once `ledger` is set. */
+  private sessions: ReconSessions | null = null;
   private readonly onChange = () => void this.load();
 
   connectedCallback() {
@@ -349,7 +353,40 @@ export class ReconcileView extends LitElement {
   }
 
   willUpdate(changed: Map<PropertyKey, unknown>) {
+    if (changed.has('ledger')) this.restore();
     if (changed.has('account') || changed.has('projection')) void this.load();
+  }
+
+  updated(changed: Map<PropertyKey, unknown>) {
+    const keys = ['account', 'date', 'balance', 'checked', 'supersedes'];
+    if (this.account !== null && keys.some((k) => changed.has(k))) {
+      this.sessions?.save(this.account, {
+        date: this.date,
+        balance: this.balance,
+        checked: [...this.checked],
+        ...(this.supersedes && { supersedes: this.supersedes }),
+      });
+    }
+  }
+
+  /** Reopens the account last reconciled on this device, where it was left. */
+  private restore() {
+    this.sessions = new ReconSessions(this.ledger.spaceId);
+    const account = this.sessions.lastAccount();
+    if (account && chartOf(this.doc).has(account)) this.open(account);
+  }
+
+  /** Shows the account, with its session in progress if this device kept one. */
+  private open(account: AccountId) {
+    const s = this.sessions?.get(account);
+    this.account = account;
+    this.loaded = null;
+    this.date = s?.date ?? periodEnd(previousMonth(today()))!;
+    this.balance = s?.balance ?? '';
+    this.checked = new Set(s?.checked);
+    this.supersedes = s?.supersedes ?? null;
+    this.error = '';
+    this.posted = null;
   }
 
   private async load() {
@@ -455,7 +492,7 @@ export class ReconcileView extends LitElement {
     return html`
       ${this.supersedes
         ? html`<p class="note">
-            Redoing the reconciliation to ${l.recons.find((r) => r.id === this.supersedes)?.statementDate}. Finishing
+            Redoing the reconciliation to ${l.recons.find((r) => r.id === this.supersedes)?.statementDate ?? '…'}. Finishing
             replaces it; until then it stands.
           </p>`
         : nothing}
@@ -567,13 +604,7 @@ export class ReconcileView extends LitElement {
   }
 
   private pick(e: Event) {
-    this.account = (e.target as HTMLSelectElement).value as AccountId;
-    this.loaded = null;
-    this.checked = new Set();
-    this.supersedes = null;
-    this.balance = '';
-    this.error = '';
-    this.posted = null;
+    this.open((e.target as HTMLSelectElement).value as AccountId);
   }
 
   private toggle(txn: MsgId) {

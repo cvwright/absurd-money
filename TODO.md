@@ -11,10 +11,6 @@ Next ID: 0045
 - [ ] 0044 Try passkey unlock on iCloud Keychain, Google Password Manager, 1Password, and a
   hardware key, in Safari, Chrome, and Firefox; note which return the PRF at creation
 
-## Milestone 2: Reconciliation
-
-- [ ] 0019 In-progress reconciliation session kept in local storage
-
 ## Milestone 3: CSV import
 
 - [ ] [0020](issues/0020-csv-parsing.md) CSV parsing and mapping of columns to fields (mapping profiles: see 0023)

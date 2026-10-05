@@ -40,6 +40,7 @@ import {
 import { LedgerSpace } from '@/services/ledger-space.js';
 import { LiveProjection, type StatusEvent, type SyncStatus } from '@/services/live-projection.js';
 import { createPasskey, passkeysSupported } from '@/services/passkey.js';
+import { clearReconSessions } from '@/services/recon-session.js';
 import type { ReEnter } from './entry-view.js';
 import { errorMessage } from './forms.js';
 import type { ProtectReason, ProtectView, SetPasswordDetail } from './protect-view.js';
@@ -622,6 +623,7 @@ export class MoneyApp extends LitElement {
       console.warn('[money-app] could not delete the saved books:', err);
     }
     clearLegacyCredentials();
+    if (spaceId) clearReconSessions(spaceId);
     this.books = null;
     // The projection holds the books decrypted, so it doesn't outlive the credentials.
     try {

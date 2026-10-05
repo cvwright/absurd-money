@@ -178,6 +178,12 @@ All notable changes to this project are documented here. The format follows
   transaction, never storing it on the transaction; the register marks reconciled lines,
   and the reversal dialog warns before reversing one. Two standing recons that clear the
   same transaction are reported as `cleared-twice`. `PROJECTION_VERSION` is 4.
+- The reconciliation in progress is kept per account in this device's local storage, never
+  in the space (0019). The ticked list, statement date, closing balance, and any redo
+  survive leaving the page or reloading, and the Reconcile page reopens on the account last
+  worked on. Finishing, cancelling a redo, or clearing everything drops the account's
+  session; signing out deletes them all. Like the projection, it sits on the device in the
+  clear (0043), and anything unreadable is dropped rather than reported.
 - The projection staying decrypted in OPFS is documented and accepted, not fixed. The
   device's disk encryption is assumed; see "Design A" in the design doc (0043).
 
