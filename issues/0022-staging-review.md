@@ -44,3 +44,42 @@ Already in place: `readStatement`, `LedgerSpace.labelRows`,
   the matches it found.
 - Approving, matching, and dismissing post what SCHEMAS.md says, and a
   second import of the same file shows nothing.
+
+## Resolution
+
+2026-10-05. Done, with the profile editor.
+
+- **Profiles.** `src/core/import-profiles.ts` has the post-time rules,
+  now in SCHEMAS.md: no profile is removed, a profile never changes
+  scheme, and only open asset and liability accounts get one. It also
+  warns which changes relabel rows already imported
+  (`relabelWarnings`), and holds the editor's draft (`draftProfile`,
+  `profileDraft`) and the first guess for a new file (`guessDraft`,
+  `guessEncoding`). `LedgerSpace` loads and rewrites
+  `ledger/import-profiles`.
+- **Suggestions.** `src/core/review.ts` matches each row to an
+  unconfirmed split with the same amount by value within 7 days, each
+  split at most once and closest dates first (`findMatches`). It
+  suggests a pending replacement (`findReplacements`): an imported split
+  dated within the file whose label the file no longer lists, with the
+  row's sign, closest date and then closest amount. It also builds the
+  entry (`importEntry`). `Projection.importSplits` supplies the
+  candidates.
+- **Approval.** `src/services/import-review.ts` posts each decision:
+  dismissals, then match edits (a dismissal instead when the matched
+  entry's segment is frozen), then entries. The file is uploaded once
+  as every entry's `source`, and each new payee is added once. A
+  replacement reverses the pending entry, then posts the row with
+  `replaces`. One failed row doesn't stop the rest, and rows another
+  device handled meanwhile are skipped. It is tested against fakes.
+- **UI.** An Import page (`import-view.ts`, with `profile-editor.ts`)
+  picks the account and file, edits the profile, and shows rows already
+  imported, skipped, and flagged. Each new row gets Add, Match, Replace
+  pending, or Dismiss, with a category and payee from the rules. A rule
+  can be made from a row, and applies at once to rows not changed by
+  hand. Unticked rows and rows with no category are left for later.
+
+Not done: review isn't kept across page loads, since re-reading the file
+recovers everything that matters. Managing rules beyond adding one is
+0047. The views were built and type-checked, but not exercised in a
+browser against a server.

@@ -261,6 +261,16 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and reports a label used twice. `LedgerSpace` labels rows, posts
   dismissals, and refuses an entry or a match that would reuse a
   consumed label.
+- CSV import page (0022). A new account gets a mapping profile from a
+  guess at the file's layout, checked against a live preview. Review
+  drops rows already imported, matches the rest against unconfirmed
+  splits (the other side of a transfer, or an entry made by hand), and
+  suggests which rows replace a pending charge imported earlier. Each
+  row is added with the rules' category and payee, matched, replaced,
+  or dismissed. Approving posts entries carrying the row's label and
+  the uploaded file as `source`. A rule can be made from a row.
+  `ledger/import-profiles` has post-time rules: profiles are never
+  removed and never change their import ID scheme.
 
 ### Changed
 

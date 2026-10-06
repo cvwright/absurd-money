@@ -5,12 +5,13 @@
  * ledger's operations. For now that is authentication, the chart of accounts
  * (`ledger/accounts`), the owner's password (0033), the budget document
  * (`ledger/budget`), the list of journal years (`ledger/journal`), the payee list
- * (`ledger/payees`), the import rules (`ledger/rules`), the `import/v1` labels of
- * statement rows (0023), posting entries, reversals, edits, and dismissals to the
- * journal, period closes to `checkpoints`, statement reconciliations to `recon`, receipts
- * as encrypted blobs, reading a journal segment, and fetching and decrypting messages for
- * the sync (sync.ts); the other State documents come in later issues. A post that loses
- * the race for its topic's chain is retried against the new head (topic-append.ts).
+ * (`ledger/payees`), the import rules (`ledger/rules`) and profiles
+ * (`ledger/import-profiles`), the `import/v1` labels of statement rows (0023), posting
+ * entries, reversals, edits, and dismissals to the journal, period closes to
+ * `checkpoints`, statement reconciliations to `recon`, receipts and imported files as
+ * encrypted blobs, reading a journal segment, and fetching and decrypting messages for
+ * the sync (sync.ts). A post that loses the race for its topic's chain is retried against
+ * the new head (topic-append.ts).
  */
 
 import { ChainError, decodeUrlSafeBase64, NotFoundError, Space, type Message } from 'reeeductio';
@@ -25,13 +26,14 @@ import { editPostProblems, packEdits, type EditTarget } from '@/core/edit.js';
 import {
   base64url, isBlobId, newPayeeId, segmentOf, yearOf, type AccountId, type BlobRef, type Label, type MsgId, type PayeeId,
 } from '@/core/ids.js';
+import { EMPTY_PROFILES, profilesUpdateProblems } from '@/core/import-profiles.js';
 import { dismissPostProblems, labelRows, packDismissals, type DismissRow, type LabeledRow } from '@/core/import-ids.js';
 import { EMPTY_JOURNAL, journalUpdateProblems, withYear } from '@/core/journal.js';
 import { parseJsonBytes } from '@/core/json.js';
 import { deriveLabelKeys, type LabelKeys } from '@/core/labels.js';
 import {
   encodeMessage, isStatePath, TOPIC_TYPES, type AccountsDoc, type BudgetDoc, type Edit, type Entry,
-  type MessageTypes, type PayeesDoc, type Recon, type Reversal, type RulesDoc,
+  type ImportProfilesDoc, type MessageTypes, type PayeesDoc, type Recon, type Reversal, type RulesDoc,
 } from '@/core/messages.js';
 import { cleanPayeeName, EMPTY_PAYEES, findPayee, payeesUpdateProblems, withPayee } from '@/core/payees.js';
 import { reconPostProblems, type ReconPostContext } from '@/core/recon.js';
@@ -96,6 +98,18 @@ export function rulesSpec(chart: Chart, payees: PayeesDoc): DocSpec<'ledger/rule
     path: 'ledger/rules',
     empty: EMPTY_RULES,
     problems: (prev, next) => rulesUpdateProblems(prev, next, { chart, payees }),
+  };
+}
+
+/**
+ * The import profiles' spec, checked against `chart`. Like `budgetSpec`, a stale chart can
+ * only reject a brand-new account.
+ */
+export function profilesSpec(chart: Chart): DocSpec<'ledger/import-profiles'> {
+  return {
+    path: 'ledger/import-profiles',
+    empty: EMPTY_PROFILES,
+    problems: (prev, next) => profilesUpdateProblems(prev, next, chart),
   };
 }
 
@@ -228,6 +242,21 @@ export class LedgerSpace {
   async updateRules(edit: (doc: RulesDoc) => RulesDoc): Promise<RulesDoc> {
     const [accounts, payees] = await Promise.all([this.loadAccounts(), this.loadPayees()]);
     return updateDoc(this.state, rulesSpec(chartOf(accounts), payees), edit);
+  }
+
+  /** The CSV mapping profiles. A space whose profiles were never written has none. */
+  loadProfiles(): Promise<ImportProfilesDoc> {
+    return loadDoc(this.state, profilesSpec(new Map()));
+  }
+
+  /**
+   * Rewrites the profiles as `edit` of the current ones, checked against the post-time
+   * rules and the latest chart. `edit` is re-run on a fresh document if another write wins
+   * the race. Returns the document written.
+   */
+  async updateProfiles(edit: (doc: ImportProfilesDoc) => ImportProfilesDoc): Promise<ImportProfilesDoc> {
+    const chart = chartOf(await this.loadAccounts());
+    return updateDoc(this.state, profilesSpec(chart), edit);
   }
 
   /** Each row of a statement imported into `account`, with its `import/v1` label (0023). */
@@ -391,7 +420,7 @@ export class LedgerSpace {
     return (await appendMessage(this.topics, 'recon', 'ledger.recon', () => data)) as MsgId;
   }
 
-  /** Encrypts `bytes` under a fresh key and uploads them, for an entry's `receipts`. */
+  /** Encrypts `bytes` under a fresh key and uploads them, for an entry's `receipts` or `source`. */
   async uploadReceipt(bytes: Uint8Array): Promise<BlobRef> {
     await this.authenticate();
     const { blob_id, key } = await this.space.encryptAndUploadBlob(bytes);

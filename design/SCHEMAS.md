@@ -920,6 +920,16 @@ A **`Profile`**:
 A `column` is a header name (string) when `header` is true, and a
 0-based index (number) otherwise.
 
+Post-time, checked against the current chart: `rev` goes up by one; no
+profile is removed; a profile never changes its import ID scheme
+(gaining or losing `fitid`), since one account's labels never mix the
+two (0023); and every new or changed profile is keyed by an open
+`asset` or `liability` account. An unchanged profile isn't checked
+again. Other changes are allowed, but some change the labels of rows
+already imported (the description, date, or amount columns, the sign,
+or the encoding), so the next import of an overlapping file shows those
+rows again. The client warns before saving such a change.
+
 #### Reading a file
 
 Decoding and CSV parsing feed the `import/v1` label, so both are pinned.

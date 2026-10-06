@@ -613,13 +613,14 @@ function profileDecoder(header: boolean): Decoder<Profile> {
   );
 }
 
-const profile: Decoder<Profile> = (v, path) => {
+/** One profile; whether `column`s are names or indices follows its `header`. */
+export const decodeProfile: Decoder<Profile> = (v, path) => {
   const header = isPlainObject(v) ? v.header : undefined;
   return profileDecoder(boolean(header, path ? `${path}.header` : 'header'))(v, path);
 };
 
 export const decodeImportProfilesDoc: Decoder<ImportProfilesDoc> = versioned(
-  object({ v: v1, rev, profiles: record(isAccountId, profile) }),
+  object({ v: v1, rev, profiles: record(isAccountId, decodeProfile) }),
 );
 
 // --- Dispatch -------------------------------------------------------------------------

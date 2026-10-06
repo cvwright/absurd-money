@@ -41,6 +41,7 @@ import {
 import type { EditTarget } from '@/core/edit.js';
 import { foldRecon, type ReconSummary } from '@/core/recon.js';
 import { isInverse, type ReversalTarget } from '@/core/reversal.js';
+import type { JournalSplit } from '@/core/review.js';
 
 /** The log's schema. Changing it means downloading every topic again. */
 export const LOG_VERSION = 1;
@@ -952,6 +953,43 @@ export class Projection {
       out.set(r.envelope as EnvelopeId, { amount: BigInt(r.amount as string), exp: r.exp as number, cur: commodity(r.cur as string) });
     }
     return out;
+  }
+
+  /**
+   * The splits on `account`, from unreversed entries dated `from` through `to`, that an
+   * import into it may match or replace (core's `JournalSplit`), by date and chain order.
+   * Amounts are summed in `bigint`, never in SQL.
+   */
+  importSplits(account: AccountId, from: IsoDate, to: IsoDate): JournalSplit[] {
+    const rows = this.db.selectObjects(
+      `SELECT t.id, t.date, t.payee, t.memo, p.split, p.amount, p.exp, p.cur, p.import_id FROM postings p
+       JOIN txns t ON t.id = p.txn
+       WHERE p.account = ? AND t.kind = 'entry' AND t.date >= ? AND t.date <= ? AND ${REVERSED_BY} IS NULL
+       ORDER BY t.date, t.topic, t.idx, p.split`,
+      [account, from, to],
+    );
+    const others = new Map<string, AccountId[]>();
+    for (const r of this.db.selectObjects(
+      `SELECT p.txn, p.account FROM postings p JOIN txns t ON t.id = p.txn
+       WHERE p.account != ? AND t.date >= ? AND t.date <= ?
+         AND p.txn IN (SELECT txn FROM postings WHERE account = ?)
+       ORDER BY p.txn, p.split`,
+      [account, from, to, account],
+    )) {
+      let list = others.get(r.txn as string);
+      if (!list) others.set(r.txn as string, (list = []));
+      if (!list.includes(r.account as AccountId)) list.push(r.account as AccountId);
+    }
+    return rows.map((r) => ({
+      txn: r.id as MsgId,
+      split: r.split as number,
+      date: r.date as IsoDate,
+      amount: { amount: BigInt(r.amount as string), exp: r.exp as number, cur: commodity(r.cur as string) },
+      others: others.get(r.id as string) ?? [],
+      ...(r.import_id !== null && { importId: r.import_id as Label }),
+      ...(r.payee !== null && { payee: r.payee as PayeeId }),
+      ...(r.memo !== null && { memo: r.memo as string }),
+    }));
   }
 
   /**

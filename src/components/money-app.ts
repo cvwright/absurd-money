@@ -5,7 +5,7 @@
  * the keys are wrapped at rest (0033) and open only with a passkey, the password, or the
  * recovery key. Unlocked, it connects to the space, opens the local projection and keeps it
  * in sync, and shows the chart of accounts, an account's register, a new entry, the opening
- * balances, statement reconciliation, or the period closes. After creating a new space it shows the recovery key
+ * balances, CSV import, statement reconciliation, or the period closes. After creating a new space it shows the recovery key
  * once, since nothing else can bring the books back if the passkeys and password are lost,
  * and then asks how to unlock them.
  *
@@ -54,6 +54,7 @@ import './register-view.js';
 import './opening-view.js';
 import './entry-view.js';
 import './reconcile-view.js';
+import './import-view.js';
 import './close-view.js';
 
 setLogLevel(import.meta.env.DEV ? 'debug' : 'warn');
@@ -68,13 +69,14 @@ type View =
   | { kind: 'ready' }
   | { kind: 'failed'; error: string };
 
-type Page = 'accounts' | 'register' | 'entry' | 'opening' | 'reconcile' | 'close';
+type Page = 'accounts' | 'register' | 'entry' | 'opening' | 'import' | 'reconcile' | 'close';
 
 const PAGES: { page: Page; label: string }[] = [
   { page: 'accounts', label: 'Accounts' },
   { page: 'register', label: 'Register' },
   { page: 'entry', label: 'New entry' },
   { page: 'opening', label: 'Opening balances' },
+  { page: 'import', label: 'Import' },
   { page: 'reconcile', label: 'Reconcile' },
   { page: 'close', label: 'Close' },
 ];
@@ -386,6 +388,9 @@ export class MoneyApp extends LitElement {
       case 'opening':
         return html`<opening-view .ledger=${this.ledger!} .projection=${this.live!.projection}
           .doc=${this.accounts!}></opening-view>`;
+      case 'import':
+        return html`<import-view .ledger=${this.ledger!} .projection=${this.live!.projection}
+          .doc=${this.accounts!}></import-view>`;
       case 'reconcile':
         return html`<reconcile-view .ledger=${this.ledger!} .projection=${this.live!.projection}
           .doc=${this.accounts!}></reconcile-view>`;

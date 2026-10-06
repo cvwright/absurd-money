@@ -331,6 +331,25 @@ describe('Projection', () => {
     expect(q.consumed([d])).toEqual(new Set([d]));
   });
 
+  it('lists the splits an import may match or replace', () => {
+    const p = Projection.open(memoryDb());
+    p.append('state', stateWith());
+    const j = chain();
+    const hand = j('hand', 'ledger.entry', entry('2026-09-12', [usd(A.checking, -500), usd(A.dining, 300), usd(A.groceries, 200)], { memo: 'coffee' }));
+    const pending = j('pending', 'ledger.entry', entry('2026-09-14', [usd(A.checking, -2000, { import_id: lbl('p') }), usd(A.dining, 2000)]));
+    const gone = j('gone', 'ledger.entry', entry('2026-09-15', [usd(A.checking, -100), usd(A.dining, 100)]));
+    const late = j('late', 'ledger.entry', entry('2026-10-20', [usd(A.checking, -100), usd(A.dining, 100)]));
+    const rev = j('rev', 'ledger.reversal', { v: 1, date: '2026-09-15', reverses: gone.hash, splits: [usd(A.checking, 100), usd(A.dining, -100)] });
+    p.append('journal-2026', [hand, pending, gone, late, rev]);
+
+    const splits = p.importSplits(A.checking, day('2026-09-01'), day('2026-09-30'));
+    // Reversed entries and reversals are left out, and so is anything outside the dates.
+    expect(splits).toEqual([
+      { txn: hand.hash, split: 0, date: '2026-09-12', amount: { amount: -500n, exp: 2, cur: USD }, others: [A.dining, A.groceries], memo: 'coffee' },
+      { txn: pending.hash, split: 0, date: '2026-09-14', amount: { amount: -2000n, exp: 2, cur: USD }, others: [A.dining], importId: lbl('p') },
+    ]);
+  });
+
   it('locks entries at or before a checkpoint head', () => {
     const p = Projection.open(memoryDb());
     p.append('state', stateWith());
