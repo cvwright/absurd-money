@@ -4,7 +4,7 @@ Open issues, grouped by milestone, in priority order. An issue is open
 if and only if it is listed here. See
 [issues/README.md](issues/README.md) for the workflow.
 
-Next ID: 0048
+Next ID: 0050
 
 ## Milestone 1: Core ledger
 
@@ -27,6 +27,11 @@ Next ID: 0048
 
 ## Later
 
+- [ ] [0048](issues/0048-starter-categories.md) Starter income and
+      expense categories after setup, and empty-state hints in import
+      and the chart
+- [ ] [0049](issues/0049-category-inference.md) Suggest categories
+      for imported rows: an inference engine and its initial seed
 - [ ] 0045 Upgrade `vite-plugin-pwa` to 2.x once a release is at least
       7 days old (2.0.0 was published 2026-10-03); read its breaking
       changes and check the generated service worker

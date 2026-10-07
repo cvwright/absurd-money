@@ -28,3 +28,6 @@ npm-debug.log*
 
 # PWA dev service worker
 dev-dist/
+
+# Dev/test credentials
+dev-space.txt
