@@ -2,14 +2,17 @@ import { defineConfig } from 'vitest/config';
 import { resolve } from 'path';
 import { VitePWA } from 'vite-plugin-pwa';
 
+// 'wasm-unsafe-eval' lets the projection worker compile SQLite's WebAssembly; it does not
+// allow eval of JavaScript. The hash is vite-plugin-pwa's inline dev service worker
+// registration, which it adds to the dev HTML even though main.ts registers.
+const headers = {
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-/AO8vAagk08SqUGxY96ci/dGyTDsuoetPOJYMn7sc+E='; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self' https: ws: wss: http://localhost:* http://127.0.0.1:*; worker-src 'self'; frame-ancestors 'none';",
+};
+
 export default defineConfig({
-  server: {
-    headers: {
-      // 'wasm-unsafe-eval' lets the projection worker compile SQLite's WebAssembly; it
-      // does not allow eval of JavaScript.
-      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self' https: ws: wss:; worker-src 'self'; frame-ancestors 'none';",
-    },
-  },
+  server: { headers },
+  // `npm run build && npm run preview` is where to test offline and the PWA.
+  preview: { headers },
   resolve: {
     alias: {
       '@': resolve(import.meta.dirname, './src'),
@@ -38,9 +41,15 @@ export default defineConfig({
         // Ledger data is end-to-end encrypted and lives in the projection, never in the
         // service worker cache. Only the app shell is precached.
         globPatterns: ['**/*.{js,css,html,svg,woff,woff2,wasm}'],
+        // Navigations are served by the navigateFallback route, which dev turns off (see
+        // devOptions). Without this, the precache would still answer `/` with index.html.
+        directoryIndex: null,
       },
       devOptions: {
         enabled: true,
+        // Never serve the page from the dev precache: it would keep the headers it was
+        // cached with, so CSP changes wouldn't apply. Dev modules aren't cached anyway.
+        navigateFallbackAllowlist: [/^$/],
       },
       manifest: {
         name: 'Absurd Money',
