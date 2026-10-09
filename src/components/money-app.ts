@@ -462,7 +462,8 @@ export class MoneyApp extends LitElement {
           ? await unlockWithPassword(spaceId, baseUrl, password)
           : await unlockWithRecoveryKey(spaceId, key ?? '', baseUrl);
       if (!(await this.connectTo(creds))) return;
-      const books = draftBooks(creds, password !== undefined);
+      // With the recovery key, the books may still have a password from another device.
+      const books = draftBooks(creds, password !== undefined || (await this.ledger!.hasPassword()));
       if (books.password) await this.remember(books);
       else this.books = books;
       this.view = { kind: 'protect', reason: 'connected' };

@@ -12,6 +12,7 @@
 import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { cardStyles } from './card-styles.js';
+import { enterSubmits } from './enter-submits.js';
 
 export interface CreateDetail {
   baseUrl: string;
@@ -61,17 +62,20 @@ export class SetupView extends LitElement {
           <label for="space">Space ID</label>
           <input id="space" name="username" .value=${this.spaceId} spellcheck="false" required
             autocomplete=${this.mode === 'password' ? 'username' : 'off'}
-            @input=${(e: Event) => (this.spaceId = (e.target as HTMLInputElement).value)} />
+            @input=${(e: Event) => (this.spaceId = (e.target as HTMLInputElement).value)}
+            @keydown=${enterSubmits} />
         `}
         ${this.mode === 'password' ? html`
           <label for="secret">Password</label>
           <input id="secret" type="password" name="password" .value=${this.secret} autocomplete="current-password" required
-            @input=${(e: Event) => (this.secret = (e.target as HTMLInputElement).value)} />
+            @input=${(e: Event) => (this.secret = (e.target as HTMLInputElement).value)}
+            @keydown=${enterSubmits} />
         ` : ''}
         ${this.mode === 'recovery' ? html`
           <label for="secret">Recovery key</label>
           <input id="secret" type="password" .value=${this.secret} autocomplete="off" required
-            @input=${(e: Event) => (this.secret = (e.target as HTMLInputElement).value)} />
+            @input=${(e: Event) => (this.secret = (e.target as HTMLInputElement).value)}
+            @keydown=${enterSubmits} />
         ` : ''}
 
         <button class="primary" type="submit" ?disabled=${this.busy}>

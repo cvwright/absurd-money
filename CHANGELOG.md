@@ -325,6 +325,13 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Connecting a device with the recovery key now asks the server whether
+  the books have a password, instead of assuming they don't and
+  offering to set one (which failed with 409) (0053).
+- Enter in the password and recovery key fields (lock screen, setup,
+  and setting a password) submits even with the Apple Passwords
+  extension, which kept the browser from submitting the form (0054).
+
 - Appending a `ledger.edit` that names an entry in another segment no
   longer deletes that entry's rows from the projection until the next
   full refold. Such an edit is ignored, and a refold now only rewrites

@@ -13,6 +13,7 @@ import { LitElement, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { SavedBooks } from '@/services/credentials.js';
 import { cardStyles } from './card-styles.js';
+import { enterSubmits } from './enter-submits.js';
 
 @customElement('unlock-view')
 export class UnlockView extends LitElement {
@@ -48,7 +49,8 @@ export class UnlockView extends LitElement {
               <input hidden name="username" autocomplete="username" .value=${spaceId} readonly />
               <label for="password">Password</label>
               <input id="password" type="password" name="password" autocomplete="current-password" required
-                .value=${this.password} @input=${(e: Event) => (this.password = (e.target as HTMLInputElement).value)} />
+                .value=${this.password} @input=${(e: Event) => (this.password = (e.target as HTMLInputElement).value)}
+                @keydown=${enterSubmits} />
               <button class=${hasPasskey ? 'secondary' : 'primary'} type="submit" ?disabled=${this.busy}>
                 Unlock with password
               </button>
@@ -69,7 +71,8 @@ export class UnlockView extends LitElement {
       <form @submit=${this.submitRecovery}>
         <label for="recovery">Recovery key</label>
         <input id="recovery" type="password" autocomplete="off" required
-          .value=${this.recoveryKey} @input=${(e: Event) => (this.recoveryKey = (e.target as HTMLInputElement).value)} />
+          .value=${this.recoveryKey} @input=${(e: Event) => (this.recoveryKey = (e.target as HTMLInputElement).value)}
+          @keydown=${enterSubmits} />
         <button class="primary" type="submit" ?disabled=${this.busy}>
           ${this.busy ? 'Working…' : 'Unlock'}
         </button>

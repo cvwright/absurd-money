@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ && markdownlint-cli2",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "E2E=1 vitest run"
   },
   "dependencies": {
     "@noble/hashes": "1.8.0",

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { resolve } from 'path';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -29,9 +29,12 @@ export default defineConfig({
     exclude: ['@sqlite.org/sqlite-wasm'],
   },
   test: {
-    // Core is pure TypeScript with no DOM, so tests run in Node.
+    // Core is pure TypeScript with no DOM, so tests run in Node. `*.e2e.test.ts` need the
+    // local reeeductio server and run only with `npm run test:e2e`.
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: process.env.E2E ? ['src/**/*.e2e.test.ts'] : ['src/**/*.test.ts'],
+    exclude: process.env.E2E ? configDefaults.exclude : [...configDefaults.exclude, 'src/**/*.e2e.test.ts'],
+    testTimeout: process.env.E2E ? 30_000 : 5_000,
     passWithNoTests: true,
   },
   plugins: [

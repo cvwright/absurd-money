@@ -14,6 +14,7 @@
 import { LitElement, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { cardStyles } from './card-styles.js';
+import { enterSubmits } from './enter-submits.js';
 
 export type ProtectReason = 'new' | 'connected' | 'migrate' | 'manage';
 
@@ -85,10 +86,12 @@ export class ProtectView extends LitElement {
               <input hidden name="username" autocomplete="username" .value=${this.spaceId} readonly />
               <label for="password">${this.hasPassword ? 'New password' : 'Password'}</label>
               <input id="password" type="password" autocomplete="new-password" required minlength=${MIN_PASSWORD}
-                .value=${this.password} @input=${(e: Event) => (this.password = (e.target as HTMLInputElement).value)} />
+                .value=${this.password} @input=${(e: Event) => (this.password = (e.target as HTMLInputElement).value)}
+                @keydown=${enterSubmits} />
               <label for="confirm">Type it again</label>
               <input id="confirm" type="password" autocomplete="new-password" required
-                .value=${this.confirmation} @input=${(e: Event) => (this.confirmation = (e.target as HTMLInputElement).value)} />
+                .value=${this.confirmation} @input=${(e: Event) => (this.confirmation = (e.target as HTMLInputElement).value)}
+                @keydown=${enterSubmits} />
               <button class=${ready || this.passkeySupported ? 'secondary' : 'primary'} type="submit" ?disabled=${this.busy !== null}>
                 ${this.busy === 'password' ? 'Working…' : this.hasPassword ? 'Change password' : 'Set password'}
               </button>

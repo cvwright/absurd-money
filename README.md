@@ -35,6 +35,8 @@ the setup screen starts with.
 - `npm run lint`: ESLint, including the XSS rules and the `src/core`
   purity rules
 - `npm test`: vitest unit tests
+- `npm run test:e2e`: tests against a real reeeductio server, on
+  `localhost:8000` or at `E2E_SERVER_URL`
 
 ## Planned stack
 

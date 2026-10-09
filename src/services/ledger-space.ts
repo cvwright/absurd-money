@@ -178,6 +178,21 @@ export class LedgerSpace {
     await this.space.opaqueRegister(OWNER_USERNAME, password);
   }
 
+  /**
+   * Whether the owner has a password on the server. Registering stores the OPAQUE record
+   * under `opaque/users/` in the space's data, which the owner can read back.
+   */
+  async hasPassword(): Promise<boolean> {
+    await this.authenticate();
+    try {
+      await this.space.getPlaintextData(`opaque/users/${OWNER_USERNAME}`);
+      return true;
+    } catch (err) {
+      if (err instanceof NotFoundError) return false;
+      throw err;
+    }
+  }
+
   /** The chart of accounts. A space whose chart was never written has an empty one. */
   loadAccounts(): Promise<AccountsDoc> {
     return loadDoc(this.state, ACCOUNTS);
