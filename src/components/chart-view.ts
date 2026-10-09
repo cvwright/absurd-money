@@ -8,7 +8,8 @@
  * projection, kept current as messages arrive. Clicking an account's name fires
  * `account-selected` to open its register. Envelopes and budgetable accounts are in
  * `ledger/budget`, managed by the budget view; each asset and liability account also has a
- * Budgetable checkbox here, which writes that document through `LedgerSpace.updateBudget`.
+ * Budgetable checkbox here, which writes that document through `LedgerSpace.updateBudget`,
+ * and each expense account a "Budget this" checkbox (0050, `setBudgetThis`).
  */
 
 import { LitElement, html, css, nothing } from 'lit';
@@ -17,10 +18,12 @@ import { isCommodity, type Commodity } from '@/core/amount.js';
 import { EMPTY_BUDGET, withBudgetable } from '@/core/budget.js';
 import type { Balances } from '@/core/fold/ledger.js';
 import { newAccountId, type AccountId } from '@/core/ids.js';
+import { chartOf } from '@/core/chart.js';
 import { ACCOUNT_TYPES, type Account, type AccountsDoc, type AccountType, type BudgetDoc } from '@/core/messages.js';
 import type { ProjectionClient } from '@/projection/client.js';
 import type { LedgerSpace } from '@/services/ledger-space.js';
 import { InvalidDocError } from '@/services/state-store.js';
+import { isBudgeted, setBudgetThis } from './budget-this.js';
 import { today } from './dates.js';
 import { formatAmount, shownAs } from './forms.js';
 
@@ -354,9 +357,14 @@ export class ChartView extends LitElement {
     `;
   }
 
-  /** Whether an asset or liability account counts toward To Be Budgeted, once the budget is loaded. */
+  /**
+   * Once the budget is loaded: whether an asset or liability account counts toward To Be
+   * Budgeted, or whether an expense account is spent from an envelope.
+   */
   private renderBudgetable(id: AccountId, account: Account) {
-    if (!this.budget || (account.type !== 'asset' && account.type !== 'liability')) return nothing;
+    if (!this.budget) return nothing;
+    if (account.type === 'expense') return this.renderBudgetThis(id, account, this.budget);
+    if (account.type !== 'asset' && account.type !== 'liability') return nothing;
     const on = this.budget.budgetable.includes(id);
     if (account.closed_at !== undefined && !on) return nothing;
     return html`
@@ -366,6 +374,35 @@ export class ChartView extends LitElement {
         Budgetable
       </label>
     `;
+  }
+
+  private renderBudgetThis(id: AccountId, account: Account, budget: BudgetDoc) {
+    const on = isBudgeted(budget, id);
+    if (account.closed_at !== undefined && !on) return nothing;
+    return html`
+      <label class="budgetable" title="Spent from an envelope">
+        <input type="checkbox" .checked=${on} ?disabled=${this.busy}
+          @change=${(e: Event) => this.budgetThis(id, e)} />
+        Budget this
+      </label>
+    `;
+  }
+
+  private async budgetThis(id: AccountId, e: Event) {
+    const box = e.target as HTMLInputElement;
+    const on = box.checked;
+    this.busy = true;
+    this.error = '';
+    try {
+      const doc = await setBudgetThis(this.ledger, this.projection!, chartOf(this.doc), this.budget!, id, on);
+      if (doc) this.budget = doc;
+      else box.checked = !on;
+    } catch (err) {
+      box.checked = !on;
+      this.error = message(err);
+    } finally {
+      this.busy = false;
+    }
   }
 
   private async setBudgetable(id: AccountId, e: Event) {

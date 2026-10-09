@@ -21,11 +21,6 @@ Next ID: 0055
       Manager, 1Password, and a hardware key, in Safari, Chrome, and
       Firefox; note which return the PRF at creation
 
-## Milestone 4: Envelope budgeting
-
-- [ ] [0050](issues/0050-budget-this.md) "Budget this" on an expense
-      account: create and pair its envelope in one step
-
 ## Later
 
 - [ ] [0048](issues/0048-starter-categories.md) Starter income and

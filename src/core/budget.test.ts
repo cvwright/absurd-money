@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { commodity } from './amount.js';
 import {
-  budgetableAccounts, budgetUpdateProblems, EMPTY_BUDGET, moveBetween, pairedTo, pairings, withBudgetable,
-  withEnvelope, withPairing,
+  budgetableAccounts, budgetUpdateProblems, EMPTY_BUDGET, moveBetween, pairedTo, pairings, soleAccount,
+  withBudgetable, withEnvelope, withoutEnvelope, withOwnEnvelope, withPairing,
 } from './budget.js';
 import type { EnvelopeId } from './ids.js';
 import type { Allocation, BudgetDoc, Reallocation } from './messages.js';
-import { A, budgetDoc, chart, E, envelope, day } from './testing.js';
+import { A, acct, budgetDoc, chart, E, envelope, day } from './testing.js';
 import { allocationPostProblems, reallocationPostProblems } from './validate.js';
 
 const EUR = commodity('EUR');
@@ -146,6 +146,76 @@ describe('editing the budget', () => {
     expect(budgetUpdateProblems(budgetDoc, { ...withBudgetable(on, A.salary, true), rev: 2 }, chart)).toEqual([
       `budgetable ${A.salary}: not an asset or liability account`,
     ]);
+  });
+});
+
+describe('budget this', () => {
+  const fresh = envelope('fresh');
+  const bare: BudgetDoc = { ...EMPTY_BUDGET, rev: 1 };
+
+  it('creates an envelope named for the account and pairs it, in one write', () => {
+    const doc = withOwnEnvelope(bare, chart, A.groceries, fresh);
+    expect(doc.envelopes).toEqual({ [fresh]: { name: 'Groceries', cur: 'USD' } });
+    expect(doc.spent_from).toEqual({ [A.groceries]: fresh });
+    expect(budgetUpdateProblems(bare, { ...doc, rev: 2 }, chart)).toEqual([]);
+    expect(soleAccount(doc, chart, fresh)).toBe(A.groceries);
+  });
+
+  it('leaves an account whose pairing counts as it is', () => {
+    expect(withOwnEnvelope(budgetDoc, chart, A.groceries, fresh)).toBe(budgetDoc);
+    const shared = withPairing(budgetDoc, A.dining, E.groceries);
+    expect(withOwnEnvelope(shared, chart, A.dining, fresh)).toBe(shared);
+  });
+
+  it('pairs with an open envelope of that name that nothing is spent from', () => {
+    const unpaired = withPairing(budgetDoc, A.groceries, null);
+    const doc = withOwnEnvelope(unpaired, chart, A.groceries, fresh);
+    expect(doc.envelopes).toBe(unpaired.envelopes);
+    expect(doc.spent_from[A.groceries]).toBe(E.groceries);
+  });
+
+  it('makes a new envelope rather than reuse one that is closed, funds another account, or differs', () => {
+    const closed = withEnvelope(withPairing(budgetDoc, A.groceries, null), E.groceries, (e) => ({
+      ...e, closed_at: day('2026-01-01'),
+    }));
+    expect(withOwnEnvelope(closed, chart, A.groceries, fresh).spent_from[A.groceries]).toBe(fresh);
+    const elsewhere = withPairing(withPairing(budgetDoc, A.groceries, null), A.dining, E.groceries);
+    expect(withOwnEnvelope(elsewhere, chart, A.groceries, fresh).spent_from[A.groceries]).toBe(fresh);
+    const euros = withEnvelope(withPairing(budgetDoc, A.groceries, null), E.groceries, (e) => ({ ...e, cur: EUR }));
+    expect(withOwnEnvelope(euros, chart, A.groceries, fresh).spent_from[A.groceries]).toBe(fresh);
+  });
+
+  it('replaces a pairing that does not count', () => {
+    const broken = withPairing(budgetDoc, A.groceries, envelope('missing'));
+    expect(withOwnEnvelope(broken, chart, A.groceries, fresh).spent_from[A.groceries]).toBe(E.groceries);
+  });
+
+  it('refuses anything but an expense account, and an ID already taken', () => {
+    expect(() => withOwnEnvelope(bare, chart, A.checking, fresh)).toThrow();
+    expect(() => withOwnEnvelope(bare, chart, acct('missing'), fresh)).toThrow();
+    expect(() => withOwnEnvelope(budgetDoc, chart, A.rent, E.dining)).toThrow();
+  });
+
+  it('unpairs, and closes the envelope only when asked and nothing else is spent from it', () => {
+    const kept = withoutEnvelope(budgetDoc, A.groceries);
+    expect(kept.spent_from).toEqual({ [A.dining]: E.dining });
+    expect(kept.envelopes).toBe(budgetDoc.envelopes);
+    const closed = withoutEnvelope(budgetDoc, A.groceries, day('2026-10-08'));
+    expect(closed.envelopes[E.groceries]).toEqual({ name: 'Groceries', cur: 'USD', closed_at: '2026-10-08' });
+    expect(budgetUpdateProblems(budgetDoc, { ...closed, rev: 2 }, chart)).toEqual([]);
+    const shared = withPairing(budgetDoc, A.dining, E.groceries);
+    expect(withoutEnvelope(shared, A.groceries, day('2026-10-08')).envelopes).toBe(shared.envelopes);
+    expect(withoutEnvelope(kept, A.groceries, day('2026-10-08'))).toBe(kept);
+  });
+
+  it('shows an envelope as its account only when it funds exactly that one, of the same name', () => {
+    expect(soleAccount(budgetDoc, chart, E.dining)).toBe(A.dining);
+    const shared = withPairing(budgetDoc, A.dining, E.groceries);
+    expect(soleAccount(shared, chart, E.groceries)).toBeUndefined();
+    expect(soleAccount(shared, chart, E.dining)).toBeUndefined();
+    const renamed = withEnvelope(budgetDoc, E.dining, (e) => ({ ...e, name: 'Eating out' }));
+    expect(soleAccount(renamed, chart, E.dining)).toBeUndefined();
+    expect(soleAccount(budgetDoc, chart, envelope('missing'))).toBeUndefined();
   });
 });
 

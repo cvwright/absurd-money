@@ -38,3 +38,27 @@ Design: [SCHEMAS.md](../design/SCHEMAS.md), `ledger/budget`;
 - Renaming the account doesn't rename its envelope. Maybe the combined
   row offers to rename both.
 - 0048's starter categories could come already budgeted this way.
+
+## Resolution
+
+2026-10-08. `withOwnEnvelope`, `withoutEnvelope`, and `soleAccount` in
+`budget.ts`, with tests. The checkbox and its confirmations are shared
+by the chart and the Budget page (`components/budget-this.ts`).
+
+Decisions:
+
+- Checking the box pairs with an existing envelope when one is open,
+  has the account's name and `cur`, and funds nothing; the first by ID
+  if several do. Otherwise it adds a new one. A new envelope takes on
+  the account's past spending, so a nonzero balance is confirmed first,
+  as re-pairing is.
+- "One row" means the envelope list: such an envelope's hint says it is
+  the envelope and expense account, rather than "Spent from by" its own
+  name. The account keeps its line in the Spending table, which is
+  where its checkbox is.
+- Renaming that combined row renames the envelope and then the
+  account, as two writes. Renaming the account on the chart still
+  leaves the envelope's name alone, so the two show separately again.
+- Whether the envelope "holds nothing" after unchecking is judged by
+  what it will have available once the account's spending no longer
+  counts against it.

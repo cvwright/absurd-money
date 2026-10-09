@@ -304,6 +304,16 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ledger.reallocation` to another open envelope in the same commodity.
   The chart of accounts has the same Budgetable checkbox on each asset
   and liability account. Core adds `withBudgetable` and `moveBetween`.
+- "Budget this" on expense accounts (0050). Each expense account has a
+  Budget this checkbox, on the chart and in the Budget page's Spending
+  table. Checking it pairs the account with an envelope of its own name
+  and `cur` in one `ledger/budget` write, reusing an open envelope of
+  that name that nothing is spent from. Unchecking it unpairs the
+  account after saying how much spending moves, and offers to close the
+  envelope if that leaves it funding nothing and holding nothing. An
+  envelope that funds exactly one account of the same name shows as
+  that account, and renaming it renames both. Core adds
+  `withOwnEnvelope`, `withoutEnvelope`, and `soleAccount`.
 
 ### Changed
 

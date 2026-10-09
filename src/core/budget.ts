@@ -101,6 +101,51 @@ export function withPairing(doc: BudgetDoc, account: AccountId, env: EnvelopeId 
   return { ...doc, spent_from: env === null ? rest : { ...rest, [account]: env } };
 }
 
+/**
+ * "Budget this" (0050): `doc` with expense account `account` spent from an envelope of its
+ * own, named and denominated as the account is. That is an open envelope of the same name
+ * and `cur` that nothing is spent from, if there is one (the first by ID), and otherwise a
+ * new envelope `fresh`. `doc` itself if the account's pairing already counts. Throws if
+ * `account` is not an expense account.
+ */
+export function withOwnEnvelope(doc: BudgetDoc, chart: Chart, account: AccountId, fresh: EnvelopeId): BudgetDoc {
+  const a = chart.get(account);
+  if (!a || a.type !== 'expense') throw new Error('Only an expense account can be budgeted.');
+  if (pairings(doc, chart).has(account)) return doc;
+  const reuse = (Object.entries(doc.envelopes) as [EnvelopeId, Envelope][])
+    .filter(([id, e]) => e.name === a.name && e.cur === a.cur && e.closed_at === undefined && pairedTo(doc, id).length === 0)
+    .map(([id]) => id)
+    .sort()[0];
+  if (reuse) return withPairing(doc, account, reuse);
+  if (envelopeOf(doc, fresh)) throw new Error(`Envelope ${fresh} already exists.`);
+  return withPairing({ ...doc, envelopes: { ...doc.envelopes, [fresh]: { name: a.name, cur: a.cur } } }, account, fresh);
+}
+
+/**
+ * Unchecking "Budget this": `doc` with `account` spent from no envelope. If `closeOn` is
+ * given, the envelope it was spent from is also closed that day, unless something else is
+ * still spent from it or it is already closed. `doc` itself if the account is unpaired.
+ */
+export function withoutEnvelope(doc: BudgetDoc, account: AccountId, closeOn?: IsoDate): BudgetDoc {
+  if (!Object.hasOwn(doc.spent_from, account)) return doc;
+  const env = doc.spent_from[account];
+  const unpaired = withPairing(doc, account, null);
+  const e = envelopeOf(unpaired, env);
+  if (closeOn === undefined || !e || e.closed_at !== undefined || pairedTo(unpaired, env).length > 0) return unpaired;
+  return withEnvelope(unpaired, env, (x) => ({ ...x, closed_at: closeOn }));
+}
+
+/**
+ * The one expense account `env` funds, if it funds exactly one and that account has the
+ * envelope's name, so the two can show as one. Only pairings that count are considered.
+ */
+export function soleAccount(doc: BudgetDoc, chart: Chart, env: EnvelopeId): AccountId | undefined {
+  const e = envelopeOf(doc, env);
+  if (!e) return undefined;
+  const funded = [...pairings(doc, chart)].filter(([, x]) => x === env).map(([a]) => a);
+  return funded.length === 1 && chart.get(funded[0])?.name === e.name ? funded[0] : undefined;
+}
+
 /** `doc` with envelope `id` changed by `f`. Throws if there is no such envelope. */
 export function withEnvelope(doc: BudgetDoc, id: EnvelopeId, f: (e: Envelope) => Envelope): BudgetDoc {
   const e = envelopeOf(doc, id);

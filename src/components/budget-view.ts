@@ -19,13 +19,17 @@
  * Budgeted is their balance less what every envelope has available, per commodity: money
  * held that no envelope claims yet. Moving money between envelopes posts one
  * `ledger.reallocation`, so a move is never half done, and leaves To Be Budgeted as it is.
+ *
+ * Most envelopes fund one expense account of the same name (0050). Each expense account
+ * has a "Budget this" checkbox that creates or removes that pairing (`setBudgetThis`), and
+ * such an envelope shows as its account: renaming it renames both.
  */
 
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { isCommodity, isZero, minor, type Amount, type Commodity } from '@/core/amount.js';
 import {
-  budgetRefProblems, EMPTY_BUDGET, moveBetween, pairedTo, withBudgetable, withEnvelope, withPairing,
+  budgetRefProblems, EMPTY_BUDGET, moveBetween, pairedTo, soleAccount, withBudgetable, withEnvelope, withPairing,
 } from '@/core/budget.js';
 import { accountLabel, accountPath, chartOf, type Chart } from '@/core/chart.js';
 import { ParseError } from '@/core/errors.js';
@@ -35,6 +39,7 @@ import type { AccountsDoc, BudgetDoc, Envelope, ScheduleStep } from '@/core/mess
 import { nextMonth, stepAt, withSchedule, withStep, withoutStep } from '@/core/schedule.js';
 import type { ProjectionClient } from '@/projection/client.js';
 import type { LedgerSpace } from '@/services/ledger-space.js';
+import { isBudgeted, setBudgetThis } from './budget-this.js';
 import { today } from './dates.js';
 import { amountOf, comparePaths, errorMessage, formatAmount } from './forms.js';
 import { viewStyles } from './view-styles.js';
@@ -307,12 +312,13 @@ export class BudgetView extends LitElement {
     const closed = e.closed_at !== undefined;
     const avail = this.available.get(id) ?? { amount: 0n, exp: 0, cur: e.cur };
     const funds = pairedTo(this.budget, id).map((a) => accountLabel(chart, a)).sort();
+    const sole = soleAccount(this.budget, chart, id);
     return html`
       <li class=${closed ? 'closed' : ''}>
         <div class="row">
           ${this.renaming === id
             ? html`<input class="name" .value=${e.name} autofocus
-                @keydown=${(ev: KeyboardEvent) => this.renameKey(ev, id)}
+                @keydown=${(ev: KeyboardEvent) => this.renameKey(ev, id, sole)}
                 @blur=${() => (this.renaming = null)} />`
             : html`<span class="name">${e.name}</span>`}
           ${closed ? html`<span class="meta">closed ${e.closed_at}</span>` : nothing}
@@ -331,7 +337,9 @@ export class BudgetView extends LitElement {
           </span>
         </div>
         <div class="hint">
-          ${funds.length > 0 ? `Spent from by ${funds.join(', ')}` : 'No expense accounts spend from it.'}
+          ${sole
+            ? `Envelope and expense account${accountPath(chart, sole).length > 1 ? ` ${accountLabel(chart, sole)}` : ''}.`
+            : funds.length > 0 ? `Spent from by ${funds.join(', ')}` : 'No expense accounts spend from it.'}
           ${this.scheduleSummary(e)}
         </div>
         ${this.allocating?.envelope === id ? this.renderAllocate(this.allocating) : nothing}
@@ -457,11 +465,13 @@ export class BudgetView extends LitElement {
     return html`
       <section>
         <h3>Spending</h3>
-        <p class="note intro">Which envelope each expense account is spent from.</p>
+        <p class="note intro">
+          Which envelope each expense account is spent from. Budget this gives an account an envelope of its own name.
+        </p>
         ${accounts.length === 0
           ? html`<div class="empty">No expense accounts yet. Add them in Accounts.</div>`
           : html`<div class="scroll"><table>
-              <thead><tr><th>Expense account</th><th>Spent from</th></tr></thead>
+              <thead><tr><th>Expense account</th><th>Budget this</th><th>Spent from</th></tr></thead>
               <tbody>
                 ${accounts.map(({ id, path }) => {
                   const cur = chart.get(id)!.cur;
@@ -473,6 +483,11 @@ export class BudgetView extends LitElement {
                   }
                   return html`<tr>
                     <td>${path.join(' › ')}</td>
+                    <td>
+                      <input type="checkbox" .checked=${isBudgeted(this.budget, id)} ?disabled=${this.busy}
+                        aria-label=${`Budget ${path.join(' › ')}`}
+                        @change=${(ev: Event) => this.budgetThis(id, ev)} />
+                    </td>
                     <td>
                       <select ?disabled=${this.busy} @change=${(ev: Event) => this.pair(id, ev)}>
                         <option value="" ?selected=${!current}>No envelope</option>
@@ -532,6 +547,24 @@ export class BudgetView extends LitElement {
     });
   }
 
+  private async budgetThis(account: AccountId, e: Event) {
+    const box = e.target as HTMLInputElement;
+    const on = box.checked;
+    this.busy = true;
+    this.error = '';
+    this.posted = '';
+    try {
+      const doc = await setBudgetThis(this.ledger, this.projection, this.chart, this.budget, account, on);
+      if (doc) this.budget = doc;
+      else box.checked = !on;
+    } catch (err) {
+      box.checked = !on;
+      this.error = errorMessage(err);
+    } finally {
+      this.busy = false;
+    }
+  }
+
   private async add(e: Event) {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
@@ -548,13 +581,30 @@ export class BudgetView extends LitElement {
     if (await this.save((doc) => ({ ...doc, envelopes: { ...doc.envelopes, [id]: envelope } }))) form.reset();
   }
 
-  private renameKey(e: KeyboardEvent, id: EnvelopeId) {
+  /** Renames envelope `id`, and `account` with it if the two show as one. */
+  private async renameKey(e: KeyboardEvent, id: EnvelopeId, account: AccountId | undefined) {
     if (e.key === 'Escape') this.renaming = null;
     if (e.key !== 'Enter') return;
     const name = (e.target as HTMLInputElement).value.trim();
     this.renaming = null;
-    if (name && name !== this.budget.envelopes[id]?.name) {
-      void this.save((doc) => withEnvelope(doc, id, (env) => ({ ...env, name })));
+    if (!name || name === this.budget.envelopes[id]?.name) return;
+    if (!(await this.save((doc) => withEnvelope(doc, id, (env) => ({ ...env, name }))))) return;
+    if (account) await this.renameAccount(account, name);
+  }
+
+  private async renameAccount(id: AccountId, name: string) {
+    this.busy = true;
+    try {
+      const doc = await this.ledger.updateAccounts((d) => {
+        const a = d.accounts[id];
+        if (!a) throw new Error('That account is no longer in the chart.');
+        return a.name === name ? d : { ...d, accounts: { ...d.accounts, [id]: { ...a, name } } };
+      });
+      this.dispatchEvent(new CustomEvent<AccountsDoc>('accounts-changed', { detail: doc, bubbles: true }));
+    } catch (err) {
+      this.error = `The envelope was renamed, but its expense account wasn't: ${errorMessage(err)}`;
+    } finally {
+      this.busy = false;
     }
   }
 
