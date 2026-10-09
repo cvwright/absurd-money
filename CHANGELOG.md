@@ -279,6 +279,14 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   refuses an allocation to a closed envelope. Pairing is timeless:
   re-pairing an expense account moves all of its spending, past and
   future, and the page says how much before it does.
+- `ledger.reallocation` (0037): a move between envelopes as one
+  message on the `budget` topic, so it is never left half done. The
+  codec checks two or more legs on distinct envelopes with non-zero
+  amounts. The fold ignores a reallocation whole unless every leg names
+  an envelope in its `cur` and the legs sum to zero; otherwise each leg
+  adds to its envelope, and To Be Budgeted is unchanged.
+  `LedgerSpace.postReallocation` also refuses a leg naming a closed
+  envelope.
 
 ### Changed
 

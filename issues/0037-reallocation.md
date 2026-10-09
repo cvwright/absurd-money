@@ -40,3 +40,19 @@ moving money between envelopes stays with 0026.
 - This issue first also made an account's `envelope` flag immutable,
   since fold-time rules depended on it. 0038 moved envelopes out of the
   chart, which removed the flag.
+
+## Resolution
+
+- `decodeReallocation` in `messages.ts`, registered for the `budget`
+  topic. Legs are unique by envelope (a duplicate is malformed) and
+  carry no `cur` of their own.
+- `reallocationProblems` and `reallocationPostProblems` in
+  `validate.ts`. Problems are reported per leg, so a reallocation can
+  fail several rules at once.
+- `foldBudget` folds both message types. A valid reallocation's legs
+  add to `allocated`, and the reallocation is listed in
+  `reallocations`; an invalid one is surfaced as an `invalid` anomaly
+  and none of its legs count.
+- `LedgerSpace.postReallocation`, for the UI in 0026.
+- No `PROJECTION_VERSION` bump: the budget fold is recomputed from the
+  raw `budget` log, and its table is unchanged.

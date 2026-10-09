@@ -8,9 +8,9 @@
  * (`ledger/payees`), the import rules (`ledger/rules`) and profiles
  * (`ledger/import-profiles`), the `import/v1` labels of statement rows (0023), posting
  * entries, reversals, edits, and dismissals to the journal, period closes to
- * `checkpoints`, statement reconciliations to `recon`, envelope allocations to `budget`,
- * receipts and imported files as encrypted blobs, reading a journal segment, and fetching
- * and decrypting messages for the sync (sync.ts). A post that loses the race for its
+ * `checkpoints`, statement reconciliations to `recon`, envelope allocations and
+ * reallocations to `budget`, receipts and imported files as encrypted blobs, reading a
+ * journal segment, and fetching and decrypting messages for the sync (sync.ts). A post that loses the race for its
  * topic's chain is retried against the new head (topic-append.ts).
  */
 
@@ -33,13 +33,14 @@ import { parseJsonBytes } from '@/core/json.js';
 import { deriveLabelKeys, type LabelKeys } from '@/core/labels.js';
 import {
   encodeMessage, isStatePath, TOPIC_TYPES, type AccountsDoc, type Allocation, type BudgetDoc, type Edit, type Entry,
-  type ImportProfilesDoc, type MessageTypes, type PayeesDoc, type Recon, type Reversal, type RulesDoc,
+  type ImportProfilesDoc, type MessageTypes, type PayeesDoc, type Reallocation, type Recon, type Reversal,
+  type RulesDoc,
 } from '@/core/messages.js';
 import { cleanPayeeName, EMPTY_PAYEES, findPayee, payeesUpdateProblems, withPayee } from '@/core/payees.js';
 import { reconPostProblems, type ReconPostContext } from '@/core/recon.js';
 import { EMPTY_RULES, rulesUpdateProblems } from '@/core/rules.js';
 import { reversalPostProblems, type ReversalTarget } from '@/core/reversal.js';
-import { allocationPostProblems, entryPostProblems } from '@/core/validate.js';
+import { allocationPostProblems, entryPostProblems, reallocationPostProblems } from '@/core/validate.js';
 import type { LogMessage } from '@/projection/projection.js';
 import { OWNER_USERNAME, type SpaceCredentials } from './credentials.js';
 import {
@@ -113,7 +114,7 @@ export function profilesSpec(chart: Chart): DocSpec<'ledger/import-profiles'> {
   };
 }
 
-/** An entry, reversal, edit, dismissal, close, reconciliation, or allocation broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
+/** An entry, reversal, edit, dismissal, close, reconciliation, allocation, or reallocation broke the post-time rules in design/SCHEMAS.md. Nothing was posted. */
 export class InvalidEntryError extends Error {
   constructor(readonly problems: readonly string[]) {
     super(problems.join('; '));
@@ -449,6 +450,18 @@ export class LedgerSpace {
     if (problems.length > 0) throw new InvalidEntryError(problems);
     const data = new TextEncoder().encode(encodeMessage('ledger.allocation', alloc));
     return (await appendMessage(this.topics, 'budget', 'ledger.allocation', () => data)) as MsgId;
+  }
+
+  /**
+   * Posts `realloc` to `budget`, after checking it against the post-time rules with the
+   * latest budget document. Returns the new message's ID. A lost race is retried without
+   * checking again, as in `postAllocation`.
+   */
+  async postReallocation(realloc: Reallocation): Promise<MsgId> {
+    const problems = reallocationPostProblems(realloc, await this.loadBudget());
+    if (problems.length > 0) throw new InvalidEntryError(problems);
+    const data = new TextEncoder().encode(encodeMessage('ledger.reallocation', realloc));
+    return (await appendMessage(this.topics, 'budget', 'ledger.reallocation', () => data)) as MsgId;
   }
 
   /** Encrypts `bytes` under a fresh key and uploads them, for an entry's `receipts` or `source`. */

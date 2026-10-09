@@ -23,8 +23,6 @@ Next ID: 0055
 
 ## Milestone 4: Envelope budgeting
 
-- [ ] [0037](issues/0037-reallocation.md) `ledger.reallocation` for
-      moves between envelopes
 - [ ] 0025 Budget schedule in `ledger/budget`, with idempotent
       materialization of allocations
 - [ ] 0026 Budgetable accounts, the To Be Budgeted calculation, and

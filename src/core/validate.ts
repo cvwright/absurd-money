@@ -12,7 +12,7 @@ import { envelopeOf } from './budget.js';
 import { isNominal, type Chart } from './chart.js';
 import { yearOf, type AccountId, type Label, type MsgId } from './ids.js';
 import type {
-  Allocation, BudgetDoc, Edit, Entry, LotAdjust, PayeesDoc, Reversal, ReversalSplit,
+  Allocation, BudgetDoc, Edit, Entry, LotAdjust, PayeesDoc, Reallocation, Reversal, ReversalSplit,
 } from './messages.js';
 
 function routingProblem(date: string, year: number | undefined): string[] {
@@ -138,6 +138,31 @@ export function allocationProblems(msg: Allocation, budget: BudgetDoc): string[]
 export function allocationPostProblems(msg: Allocation, budget: BudgetDoc): string[] {
   const problems = allocationProblems(msg, budget);
   if (envelopeOf(budget, msg.envelope)?.closed_at !== undefined) problems.push('envelope is closed');
+  return problems;
+}
+
+/**
+ * Fold-time rules for `ledger.reallocation`: every leg names an envelope in the message's
+ * `cur`, and the legs sum to zero. Like an allocation's, the verdict never changes once
+ * the envelopes exist.
+ */
+export function reallocationProblems(msg: Reallocation, budget: BudgetDoc): string[] {
+  const problems: string[] = [];
+  msg.legs.forEach((leg, i) => {
+    const e = envelopeOf(budget, leg.envelope);
+    if (!e) problems.push(`leg ${i}: unknown envelope`);
+    else if (e.cur !== msg.cur) problems.push(`leg ${i}: ${msg.cur} moved to a ${e.cur} envelope`);
+  });
+  if (!sumsToZero(msg.legs.map((l) => ({ ...l, cur: msg.cur })))) problems.push('legs do not sum to zero');
+  return problems;
+}
+
+/** Everything checked before posting a reallocation: the fold-time rules, and every envelope is open. */
+export function reallocationPostProblems(msg: Reallocation, budget: BudgetDoc): string[] {
+  const problems = reallocationProblems(msg, budget);
+  msg.legs.forEach((leg, i) => {
+    if (envelopeOf(budget, leg.envelope)?.closed_at !== undefined) problems.push(`leg ${i}: envelope is closed`);
+  });
   return problems;
 }
 

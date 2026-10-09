@@ -232,6 +232,59 @@ describe('budget', () => {
     expect(fold.allocated.get(E.groceries)!.amount).toBe(60000n);
   });
 
+  const realloc = (name: string, legs: [string, number][], extra: object = {}) =>
+    m(name, 'ledger.reallocation', {
+      v: 1, date: '2026-09-14', cur: 'USD',
+      legs: legs.map(([envelope, amount]) => ({ envelope, amount: String(amount), exp: 2 })), ...extra,
+    });
+
+  it('adds each leg of a reallocation to its envelope, leaving To Be Budgeted unchanged', () => {
+    const seg = foldSegment('journal-2026', [pay], { chart });
+    const b = balances([seg]);
+    const allocs = [alloc('a1', E.groceries, 60000), alloc('a2', E.dining, 20000)];
+    const before = foldBudget(allocs, budgetDoc);
+    const after = foldBudget([...allocs, realloc('r1', [[E.dining, -5000], [E.groceries, 5000]])], budgetDoc);
+    expect(after.anomalies).toEqual([]);
+    expect(after.reallocations.map((r) => r.id)).toEqual([msg('r1')]);
+    expect(after.allocations.map((a) => a.id)).toEqual([msg('a1'), msg('a2')]);
+    expect(after.allocated.get(E.groceries)!.amount).toBe(65000n);
+    expect(after.allocated.get(E.dining)!.amount).toBe(15000n);
+    const tbb = (f: typeof before) =>
+      toBeBudgeted(budgetDoc, chart, b, envelopeAvailable(budgetDoc, chart, f.allocated, b)).get(USD)!.amount;
+    expect(tbb(after)).toBe(tbb(before));
+    expect(tbb(after)).toBe(20000n);
+  });
+
+  it('covers one envelope from several, even ones never allocated to', () => {
+    const three = { ...budgetDoc, envelopes: { ...budgetDoc.envelopes, [envelope('gifts')]: { name: 'Gifts', cur: USD } } };
+    const ok = foldBudget([realloc('r2', [[E.groceries, -3000], [envelope('gifts'), -1000], [E.dining, 4000]])], three);
+    expect(ok.anomalies).toEqual([]);
+    expect([...ok.allocated].map(([env, a]) => [env, a.amount])).toEqual([
+      [E.groceries, -3000n], [envelope('gifts'), -1000n], [E.dining, 4000n],
+    ]);
+  });
+
+  it('ignores a reallocation that breaks a fold-time rule whole', () => {
+    const fold = foldBudget(
+      [
+        alloc('a1', E.groceries, 60000),
+        realloc('r1', [[E.groceries, -5000], [envelope('missing'), 5000]]),
+        realloc('r2', [[E.groceries, -5000], [E.dining, 4999]]),
+        realloc('r3', [[E.groceries, -5000], [E.dining, 5000]], { cur: 'EUR' }),
+        realloc('r4', [[E.groceries, -5000], [E.groceries, 5000]]),
+      ],
+      budgetDoc,
+    );
+    expect(fold.reallocations).toEqual([]);
+    expect(fold.anomalies.map((a) => [a.kind, a.msg, a.detail])).toEqual([
+      ['invalid', msg('r1'), 'leg 1: unknown envelope'],
+      ['invalid', msg('r2'), 'legs do not sum to zero'],
+      ['invalid', msg('r3'), 'leg 0: EUR moved to a USD envelope; leg 1: EUR moved to a USD envelope'],
+      ['malformed', msg('r4'), expect.stringContaining('duplicate')],
+    ]);
+    expect([...fold.allocated].map(([env, a]) => [env, a.amount])).toEqual([[E.groceries, 60000n]]);
+  });
+
   it('To Be Budgeted is unchanged by spending from an envelope, even on a card', () => {
     // Paycheck 1000, allocate 600 to groceries, spend 550: TBB stays 400.
     const seg = foldSegment('journal-2026', [

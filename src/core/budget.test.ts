@@ -4,9 +4,9 @@ import {
   budgetableAccounts, budgetUpdateProblems, EMPTY_BUDGET, pairedTo, pairings, withEnvelope, withPairing,
 } from './budget.js';
 import type { EnvelopeId } from './ids.js';
-import type { Allocation, BudgetDoc } from './messages.js';
+import type { Allocation, BudgetDoc, Reallocation } from './messages.js';
 import { A, budgetDoc, chart, E, envelope, day } from './testing.js';
-import { allocationPostProblems } from './validate.js';
+import { allocationPostProblems, reallocationPostProblems } from './validate.js';
 
 const EUR = commodity('EUR');
 const next = (doc: BudgetDoc, change: Partial<BudgetDoc>): BudgetDoc => ({ ...doc, rev: doc.rev + 1, ...change });
@@ -72,6 +72,40 @@ describe('allocationPostProblems', () => {
       envelopes: { ...budgetDoc.envelopes, [E.dining]: { ...budgetDoc.envelopes[E.dining], closed_at: day('2026-01-01') } },
     };
     expect(allocationPostProblems(alloc(E.dining), closed)).toEqual(['envelope is closed']);
+  });
+});
+
+describe('reallocationPostProblems', () => {
+  const move = (legs: [EnvelopeId, bigint][], cur = 'USD'): Reallocation => ({
+    v: 1, date: day('2026-10-14'), cur: commodity(cur),
+    legs: legs.map(([envelope, amount]) => ({ envelope, amount, exp: 2 })),
+  });
+
+  it('accepts a move between open envelopes that sums to zero', () => {
+    expect(reallocationPostProblems(move([[E.dining, -2000n], [E.groceries, 2000n]]), budgetDoc)).toEqual([]);
+  });
+
+  it('applies the fold-time rules', () => {
+    expect(reallocationPostProblems(move([[E.dining, -2000n], [envelope('missing'), 2000n]]), budgetDoc)).toEqual([
+      'leg 1: unknown envelope',
+    ]);
+    expect(reallocationPostProblems(move([[E.dining, -2000n], [E.groceries, 2000n]], 'EUR'), budgetDoc)).toEqual([
+      'leg 0: EUR moved to a USD envelope',
+      'leg 1: EUR moved to a USD envelope',
+    ]);
+    expect(reallocationPostProblems(move([[E.dining, -2000n], [E.groceries, 1999n]]), budgetDoc)).toEqual([
+      'legs do not sum to zero',
+    ]);
+  });
+
+  it('rejects a leg naming a closed envelope, from either side', () => {
+    const closed = withEnvelope(budgetDoc, E.dining, (e) => ({ ...e, closed_at: day('2026-01-01') }));
+    expect(reallocationPostProblems(move([[E.dining, -2000n], [E.groceries, 2000n]]), closed)).toEqual([
+      'leg 0: envelope is closed',
+    ]);
+    expect(reallocationPostProblems(move([[E.groceries, -2000n], [E.dining, 2000n]]), closed)).toEqual([
+      'leg 1: envelope is closed',
+    ]);
   });
 });
 

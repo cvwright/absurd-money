@@ -427,6 +427,12 @@ describe('Projection', () => {
       b('al2', 'ledger.allocation', { v: 1, date: '2026-02-01', envelope: E.groceries, amount: '60000', exp: 2, cur: 'USD' }),
     ]);
     expect(p.allocated().get(E.groceries)).toEqual({ amount: 120000n, exp: 2, cur: USD });
+    p.append('budget', [
+      b('re1', 'ledger.reallocation', {
+        v: 1, date: '2026-02-20', cur: 'USD',
+        legs: [{ envelope: E.groceries, amount: '-10000', exp: 2 }, { envelope: E.dining, amount: '10000', exp: 2 }],
+      }),
+    ]);
 
     const j = chain();
     p.append('journal-2026', [
@@ -434,8 +440,8 @@ describe('Projection', () => {
       j('eat', 'ledger.entry', entry('2026-02-15', [usd(A.checking, -2311), usd(A.dining, 2311)])),
     ]);
     expect(p.available()).toEqual(new Map([
-      [E.groceries, { amount: 120000n - 8423n, exp: 2, cur: USD }],
-      [E.dining, { amount: -2311n, exp: 2, cur: USD }],
+      [E.groceries, { amount: 110000n - 8423n, exp: 2, cur: USD }],
+      [E.dining, { amount: 10000n - 2311n, exp: 2, cur: USD }],
     ]));
   });
 

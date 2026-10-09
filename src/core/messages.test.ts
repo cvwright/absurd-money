@@ -117,6 +117,27 @@ describe('other messages', () => {
     expect(() => decodeMessage('ledger.checkpoint', { ...close, lots: [] })).toThrow(CodecError);
     expect(() => decodeMessage('ledger.checkpoint', { ...close, period: '2025-13' })).toThrow(CodecError);
   });
+  describe('ledger.reallocation', () => {
+    const move = {
+      v: 1, date: '2026-10-14', cur: 'USD', memo: 'cover groceries overspend',
+      legs: [{ envelope: E.dining, amount: '-2000', exp: 2 }, { envelope: E.groceries, amount: '2000', exp: 2 }],
+    };
+    it('decodes amounts to bigint and round-trips', () => {
+      const r = decodeMessage('ledger.reallocation', move);
+      expect(r.legs.map((l) => l.amount)).toEqual([-2000n, 2000n]);
+      expect(JSON.parse(encodeMessage('ledger.reallocation', r))).toEqual(move);
+    });
+    it.each([
+      ['one leg', { ...move, legs: [move.legs[0]] }],
+      ['a repeated envelope', { ...move, legs: [move.legs[0], { ...move.legs[1], envelope: E.dining }] }],
+      ['a zero leg', { ...move, legs: [move.legs[0], { ...move.legs[1], amount: '0' }] }],
+      ['a leg with its own cur', { ...move, legs: [move.legs[0], { ...move.legs[1], cur: 'USD' }] }],
+      ['an empty memo', { ...move, memo: '' }],
+      ['no cur', { v: 1, date: move.date, legs: move.legs }],
+    ])('rejects %s', (_, data) => {
+      expect(() => decodeMessage('ledger.reallocation', data)).toThrow(CodecError);
+    });
+  });
   it('ledger.recon rejects duplicate cleared entries', () => {
     const recon = {
       v: 1, account: A.checking, statement_date: '2026-09-30',

@@ -1,7 +1,7 @@
 /**
  * The `budget` topic fold and the envelope figures derived from it. See "Envelope
- * budgeting" in design/ACCOUNTING.md, and `ledger.allocation` and `ledger/budget` in
- * design/SCHEMAS.md.
+ * budgeting" in design/ACCOUNTING.md, and `ledger.allocation`, `ledger.reallocation`, and
+ * `ledger/budget` in design/SCHEMAS.md.
  */
 
 import { add, sub, type Amount, type Commodity } from '../amount.js';
@@ -11,37 +11,56 @@ import { CodecError } from '../errors.js';
 import type { EnvelopeId, Label, MsgId } from '../ids.js';
 import {
   decodeMessage, UnknownTypeError, UnknownVersionError, type Allocation, type BudgetDoc, type Envelope,
+  type Reallocation,
 } from '../messages.js';
-import { allocationProblems } from '../validate.js';
+import { allocationProblems, reallocationProblems } from '../validate.js';
 import { balanceOf, type Balances } from './ledger.js';
 import type { Anomaly, RawMessage } from './segment.js';
 
 export interface BudgetFold {
   /** The allocations that count, in chain order. */
   readonly allocations: readonly { readonly id: MsgId; readonly msg: Allocation }[];
-  /** Σ allocations per envelope. */
+  /** The reallocations that count, in chain order. */
+  readonly reallocations: readonly { readonly id: MsgId; readonly msg: Reallocation }[];
+  /** Σ allocations and reallocation legs per envelope. */
   readonly allocated: ReadonlyMap<EnvelopeId, Amount>;
   readonly anomalies: readonly Anomaly[];
   readonly halted?: { readonly at: MsgId; readonly error: UnknownTypeError | UnknownVersionError };
 }
 
+type BudgetMessage =
+  | { readonly type: 'ledger.allocation'; readonly msg: Allocation }
+  | { readonly type: 'ledger.reallocation'; readonly msg: Reallocation };
+
+function decodeBudgetMessage(type: string, data: unknown): BudgetMessage {
+  if (type === 'ledger.allocation') return { type, msg: decodeMessage(type, data) };
+  if (type === 'ledger.reallocation') return { type, msg: decodeMessage(type, data) };
+  throw new UnknownTypeError(type);
+}
+
 /**
  * Folds the `budget` chain. If two allocations carry the same `idem`, only the first that
  * counts is kept; the others are duplicates from a materialization race and are ignored
- * silently.
+ * silently. A reallocation that breaks a fold-time rule is ignored whole; otherwise each
+ * leg adds to its envelope as an allocation would.
  */
 export function foldBudget(messages: readonly RawMessage[], budget: BudgetDoc): BudgetFold {
   const allocations: { id: MsgId; msg: Allocation }[] = [];
+  const reallocations: { id: MsgId; msg: Reallocation }[] = [];
   const allocated = new Map<EnvelopeId, Amount>();
   const anomalies: Anomaly[] = [];
   const idems = new Set<Label>();
   let halted: BudgetFold['halted'];
 
+  const allocate = (env: EnvelopeId, a: Amount) => {
+    const prev = allocated.get(env);
+    allocated.set(env, prev ? add(prev, a) : { amount: a.amount, exp: a.exp, cur: a.cur });
+  };
+
   for (const { id, type, data } of messages) {
-    let msg: Allocation;
+    let m: BudgetMessage;
     try {
-      if (type !== 'ledger.allocation') throw new UnknownTypeError(type);
-      msg = decodeMessage('ledger.allocation', data);
+      m = decodeBudgetMessage(type, data);
     } catch (e) {
       if (e instanceof UnknownTypeError || e instanceof UnknownVersionError) {
         halted = { at: id, error: e };
@@ -53,20 +72,26 @@ export function foldBudget(messages: readonly RawMessage[], budget: BudgetDoc): 
       }
       throw e;
     }
-    const problems = allocationProblems(msg, budget);
+    const problems =
+      m.type === 'ledger.allocation' ? allocationProblems(m.msg, budget) : reallocationProblems(m.msg, budget);
     if (problems.length > 0) {
       anomalies.push({ kind: 'invalid', msg: id, detail: problems.join('; ') });
       continue;
     }
+    if (m.type === 'ledger.reallocation') {
+      reallocations.push({ id, msg: m.msg });
+      for (const leg of m.msg.legs) allocate(leg.envelope, { ...leg, cur: m.msg.cur });
+      continue;
+    }
+    const msg = m.msg;
     if (msg.idem !== undefined) {
       if (idems.has(msg.idem)) continue;
       idems.add(msg.idem);
     }
     allocations.push({ id, msg });
-    const prev = allocated.get(msg.envelope);
-    allocated.set(msg.envelope, prev ? add(prev, msg) : { amount: msg.amount, exp: msg.exp, cur: msg.cur });
+    allocate(msg.envelope, msg);
   }
-  return { allocations, allocated, anomalies, halted };
+  return { allocations, reallocations, allocated, anomalies, halted };
 }
 
 /**

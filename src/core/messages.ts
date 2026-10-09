@@ -242,6 +242,21 @@ export interface Allocation {
   readonly memo?: string;
 }
 
+/** One envelope's share of a reallocation, in the message's `cur`. */
+export interface ReallocationLeg {
+  readonly envelope: EnvelopeId;
+  readonly amount: bigint;
+  readonly exp: number;
+}
+
+export interface Reallocation {
+  readonly v: 1;
+  readonly date: IsoDate;
+  readonly cur: Commodity;
+  readonly legs: readonly ReallocationLeg[];
+  readonly memo?: string;
+}
+
 export interface Recon {
   readonly v: 1;
   readonly account: AccountId;
@@ -303,6 +318,15 @@ export const decodeAllocation: Decoder<Allocation> = versioned(
   object(
     { v: v1, date, envelope: envelopeId, amount: nonZeroInt, exp, cur: commodity },
     { idem: label, memo: nonEmptyString },
+  ),
+);
+
+const reallocationLeg: Decoder<ReallocationLeg> = object({ envelope: envelopeId, amount: nonZeroInt, exp });
+
+export const decodeReallocation: Decoder<Reallocation> = versioned(
+  object(
+    { v: v1, date, cur: commodity, legs: arrayOf(reallocationLeg, { min: 2, uniqueBy: (l) => l.envelope }) },
+    { memo: nonEmptyString },
   ),
 );
 
@@ -632,6 +656,7 @@ export interface MessageTypes {
   'ledger.dismiss': Dismiss;
   'ledger.lotadjust': LotAdjust;
   'ledger.allocation': Allocation;
+  'ledger.reallocation': Reallocation;
   'ledger.recon': Recon;
   'ledger.checkpoint': Checkpoint;
 }
@@ -654,6 +679,7 @@ const MESSAGE_DECODERS: { [T in MessageType]: Decoder<MessageTypes[T]> } = {
   'ledger.dismiss': decodeDismiss,
   'ledger.lotadjust': decodeLotAdjust,
   'ledger.allocation': decodeAllocation,
+  'ledger.reallocation': decodeReallocation,
   'ledger.recon': decodeRecon,
   'ledger.checkpoint': decodeCheckpoint,
 };
@@ -670,7 +696,7 @@ const STATE_DECODERS: { [P in StatePath]: Decoder<StateDocs[P]> } = {
 /** The message types each topic carries. */
 export const TOPIC_TYPES = {
   journal: ['ledger.entry', 'ledger.reversal', 'ledger.edit', 'ledger.dismiss', 'ledger.lotadjust'],
-  budget: ['ledger.allocation'],
+  budget: ['ledger.allocation', 'ledger.reallocation'],
   recon: ['ledger.recon'],
   checkpoints: ['ledger.checkpoint'],
 } as const satisfies Record<string, readonly MessageType[]>;
