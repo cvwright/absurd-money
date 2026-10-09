@@ -26,7 +26,7 @@ import { chainOrder } from '@/core/chain.js';
 import { chartOf, EMPTY_CHART } from '@/core/chart.js';
 import { EMPTY_BUDGET } from '@/core/budget.js';
 import { CodecError } from '@/core/errors.js';
-import { envelopeAvailable, foldBudget } from '@/core/fold/budget.js';
+import { envelopeAvailable, foldBudget, toBeBudgeted } from '@/core/fold/budget.js';
 import { balances as foldBalances, type Balances, type BalanceWindow } from '@/core/fold/ledger.js';
 import { foldSegment, type Anomaly, type AnomalyKind, type RawMessage } from '@/core/fold/segment.js';
 import {
@@ -963,6 +963,17 @@ export class Projection {
     const budget = this.doc('ledger/budget') ?? EMPTY_BUDGET;
     const chart = chartOf(this.doc('ledger/accounts') ?? EMPTY_CHART);
     return envelopeAvailable(budget, chart, this.allocated(), this.balances());
+  }
+
+  /**
+   * To Be Budgeted per commodity (core's `toBeBudgeted`): the budgetable accounts' balances
+   * less what every envelope has available. A commodity with neither is absent.
+   */
+  toBeBudgeted(): Map<Commodity, Amount> {
+    const budget = this.doc('ledger/budget') ?? EMPTY_BUDGET;
+    const chart = chartOf(this.doc('ledger/accounts') ?? EMPTY_CHART);
+    const balances = this.balances();
+    return toBeBudgeted(budget, chart, balances, envelopeAvailable(budget, chart, this.allocated(), balances));
   }
 
   /**

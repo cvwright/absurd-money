@@ -7,9 +7,10 @@
  * `cur` never change, so a reference that was valid when written stays valid.
  */
 
+import type { Amount } from './amount.js';
 import type { Chart } from './chart.js';
-import type { AccountId, EnvelopeId } from './ids.js';
-import type { BudgetDoc, Envelope } from './messages.js';
+import type { AccountId, EnvelopeId, IsoDate } from './ids.js';
+import type { BudgetDoc, Envelope, Reallocation } from './messages.js';
 
 /**
  * The budget before its first write. Its `rev` is 0, so the first write is rev 1. It is
@@ -105,4 +106,31 @@ export function withEnvelope(doc: BudgetDoc, id: EnvelopeId, f: (e: Envelope) =>
   const e = envelopeOf(doc, id);
   if (!e) throw new Error('That envelope is no longer in the budget.');
   return { ...doc, envelopes: { ...doc.envelopes, [id]: f(e) } };
+}
+
+/** `doc` with `account` counted toward To Be Budgeted if `on`, and not if not. */
+export function withBudgetable(doc: BudgetDoc, account: AccountId, on: boolean): BudgetDoc {
+  const rest = doc.budgetable.filter((id) => id !== account);
+  return { ...doc, budgetable: on ? [...rest, account] : rest };
+}
+
+/**
+ * A reallocation moving `amount` from envelope `from` to envelope `to`, in `amount`'s
+ * commodity. `amount` must be positive and the envelopes distinct.
+ */
+export function moveBetween(
+  from: EnvelopeId,
+  to: EnvelopeId,
+  amount: Amount,
+  date: IsoDate,
+  memo?: string,
+): Reallocation {
+  if (from === to) throw new Error('Choose a different envelope to move to.');
+  if (amount.amount <= 0n) throw new Error('Move an amount greater than zero.');
+  const { exp, cur } = amount;
+  return {
+    v: 1, date, cur,
+    legs: [{ envelope: from, amount: -amount.amount, exp }, { envelope: to, amount: amount.amount, exp }],
+    ...(memo && { memo }),
+  };
 }

@@ -9,7 +9,7 @@ import type { Projection } from './projection.js';
 export const METHODS = [
   'watermarks', 'watermark', 'append', 'doc', 'years', 'balances', 'register', 'reversalTarget', 'editTarget',
   'segmentOpen', 'closes', 'entriesAfter', 'openings', 'reconcilable', 'reconciliations',
-  'consumed', 'importSplits', 'allocated', 'available', 'anomalies', 'halts',
+  'consumed', 'importSplits', 'allocated', 'available', 'toBeBudgeted', 'anomalies', 'halts',
 ] as const satisfies readonly (keyof Projection)[];
 
 export type Method = (typeof METHODS)[number];

@@ -15,13 +15,18 @@
  * a month on. Saving a step posts the allocations it calls for, as opening the books does
  * (`LedgerSpace.materializeSchedule`), back to the step's month if it is in the past.
  *
- * Budgetable accounts, To Be Budgeted, and moves between envelopes come with 0026.
+ * Which asset and liability accounts are budgetable is in the document too (0026). To Be
+ * Budgeted is their balance less what every envelope has available, per commodity: money
+ * held that no envelope claims yet. Moving money between envelopes posts one
+ * `ledger.reallocation`, so a move is never half done, and leaves To Be Budgeted as it is.
  */
 
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { isCommodity, isZero, minor, type Amount, type Commodity } from '@/core/amount.js';
-import { budgetRefProblems, EMPTY_BUDGET, pairedTo, withEnvelope, withPairing } from '@/core/budget.js';
+import {
+  budgetRefProblems, EMPTY_BUDGET, moveBetween, pairedTo, withBudgetable, withEnvelope, withPairing,
+} from '@/core/budget.js';
 import { accountLabel, accountPath, chartOf, type Chart } from '@/core/chart.js';
 import { ParseError } from '@/core/errors.js';
 import { balanceOf, type Balances } from '@/core/fold/ledger.js';
@@ -38,6 +43,14 @@ interface StepInput {
   envelope: EnvelopeId;
   from: string;
   amount: string;
+}
+
+interface MoveInput {
+  from: EnvelopeId;
+  to: EnvelopeId | '';
+  amount: string;
+  date: string;
+  memo: string;
 }
 
 interface AllocationInput {
@@ -59,6 +72,15 @@ function envelopesOf(doc: BudgetDoc, showClosed: boolean): [EnvelopeId, Envelope
   return (Object.entries(doc.envelopes) as [EnvelopeId, Envelope][])
     .filter(([, e]) => showClosed || e.closed_at === undefined)
     .sort((x, y) => x[1].name.localeCompare(y[1].name));
+}
+
+/** The asset and liability accounts that can be budgetable, plus closed ones that are, by path. */
+function holdingAccounts(chart: Chart, doc: BudgetDoc): { id: AccountId; path: string[] }[] {
+  return [...chart]
+    .filter(([id, a]) =>
+      (a.type === 'asset' || a.type === 'liability') && (a.closed_at === undefined || doc.budgetable.includes(id)))
+    .map(([id]) => ({ id, path: accountPath(chart, id) }))
+    .sort((x, y) => comparePaths(x.path, y.path));
 }
 
 /** The expense accounts that can be paired, plus closed ones that already are, by path. */
@@ -156,6 +178,20 @@ export class BudgetView extends LitElement {
         width: 8em;
       }
 
+      .tbb {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--spacing-md);
+        padding: var(--spacing-md);
+        background-color: var(--color-bg-elevated);
+        border-radius: var(--radius-md);
+        margin-bottom: var(--spacing-lg);
+      }
+
+      .tbb .figure {
+        font-size: var(--font-size-lg);
+      }
+
       form.allocate input[name='memo'] {
         flex: 1 1 120px;
       }
@@ -177,12 +213,14 @@ export class BudgetView extends LitElement {
   @state() private budget: BudgetDoc = EMPTY_BUDGET;
   @state() private available = new Map<EnvelopeId, Amount>();
   @state() private balances: Balances = new Map();
+  @state() private tbb = new Map<Commodity, Amount>();
   @state() private showClosed = false;
   @state() private busy = false;
   @state() private error = '';
   @state() private posted = '';
   @state() private renaming: EnvelopeId | null = null;
   @state() private allocating: AllocationInput | null = null;
+  @state() private moving: MoveInput | null = null;
   @state() private scheduling: StepInput | null = null;
 
   private readonly onChange = () => void this.load();
@@ -200,15 +238,17 @@ export class BudgetView extends LitElement {
 
   private async load() {
     try {
-      const [doc, available, balances] = await Promise.all([
+      const [doc, available, balances, tbb] = await Promise.all([
         this.projection.call('doc', 'ledger/budget') as Promise<BudgetDoc | undefined>,
         this.projection.call('available'),
         this.projection.call('balances'),
+        this.projection.call('toBeBudgeted'),
       ]);
       // A document just written here may not have synced back yet.
       if (doc && doc.rev >= this.budget.rev) this.budget = doc;
       this.available = available;
       this.balances = balances;
+      this.tbb = tbb;
     } catch (err) {
       console.warn('[budget-view] projection unavailable:', err);
     }
@@ -243,6 +283,8 @@ export class BudgetView extends LitElement {
         ? html`<div class="warning">These parts of the budget don't count: ${problems.join('; ')}.</div>`
         : nothing}
 
+      ${this.renderToBeBudgeted()}
+
       <form class="add" @submit=${this.add}>
         <input name="name" placeholder="New envelope name" required autocomplete="off" />
         <input name="cur" value="USD" required title="Commodity, such as USD" autocomplete="off" />
@@ -255,6 +297,7 @@ export class BudgetView extends LitElement {
         : html`<ul>${envelopes.map(([id, e]) => this.renderEnvelope(chart, id, e))}</ul>`}
 
       ${this.renderPairings(chart)}
+      ${this.renderBudgetable(chart)}
 
       <p class="meta">Revision ${this.budget.rev}</p>
     `;
@@ -279,6 +322,7 @@ export class BudgetView extends LitElement {
             ${closed
               ? nothing
               : html`<button type="button" ?disabled=${this.busy} @click=${() => this.startAllocating(id)}>Allocate</button>
+                  <button type="button" ?disabled=${this.busy} @click=${() => this.startMoving(id)}>Move</button>
                   <button type="button" ?disabled=${this.busy} @click=${() => this.startScheduling(id)}>Schedule</button>`}
             <button type="button" ?disabled=${this.busy} @click=${() => (this.renaming = id)}>Rename</button>
             ${closed
@@ -291,6 +335,7 @@ export class BudgetView extends LitElement {
           ${this.scheduleSummary(e)}
         </div>
         ${this.allocating?.envelope === id ? this.renderAllocate(this.allocating) : nothing}
+        ${this.moving?.from === id ? this.renderMove(e, this.moving) : nothing}
         ${this.scheduling?.envelope === id ? this.renderSchedule(e, this.scheduling) : nothing}
       </li>
     `;
@@ -308,6 +353,59 @@ export class BudgetView extends LitElement {
         <input name="memo" .value=${input.memo} @input=${set('memo')} placeholder="Memo (optional)" autocomplete="off" />
         <button class="primary" type="submit" ?disabled=${this.busy}>Allocate</button>
         <button class="link" type="button" @click=${() => (this.allocating = null)}>Cancel</button>
+      </form>
+    `;
+  }
+
+  /** To Be Budgeted per commodity: money in budgetable accounts that no envelope holds. */
+  private renderToBeBudgeted() {
+    if (this.budget.budgetable.length === 0) {
+      return html`<div class="tbb hint">
+        No accounts count toward To Be Budgeted yet. Choose the accounts your spending money is in, under
+        Budgetable accounts below.
+      </div>`;
+    }
+    const figures = [...this.tbb.values()].sort((x, y) => x.cur.localeCompare(y.cur));
+    return html`
+      <div class="tbb" title="Budgetable balances, less what every envelope has available">
+        <span>To Be Budgeted</span>
+        ${figures.map((a) => html`<span class="figure">
+          <span class="num ${a.amount < 0n ? 'negative' : ''}">${formatAmount(a)}</span>
+          <span class="cur">${a.cur}</span>
+        </span>`)}
+        ${figures.some((a) => a.amount < 0n)
+          ? html`<span class="hint">Below zero, the envelopes hold more than the budgetable accounts do. Take some
+              back from an envelope with a negative allocation.</span>`
+          : nothing}
+      </div>
+    `;
+  }
+
+  private renderMove(e: Envelope, input: MoveInput) {
+    const set = (field: 'to' | 'amount' | 'date' | 'memo') => (ev: Event) => {
+      this.moving = { ...input, [field]: (ev.target as HTMLInputElement | HTMLSelectElement).value };
+    };
+    const targets = envelopesOf(this.budget, false).filter(([id, x]) => id !== input.from && x.cur === e.cur);
+    if (targets.length === 0) {
+      return html`<div class="hint">
+        There is no other open ${e.cur} envelope to move money to.
+        <button class="link" type="button" @click=${() => (this.moving = null)}>Cancel</button>
+      </div>`;
+    }
+    return html`
+      <form class="allocate" @submit=${this.move}>
+        <input name="amount" .value=${input.amount} @input=${set('amount')} placeholder="Amount" required
+          autocomplete="off" autofocus />
+        <label>to
+          <select name="to" required @change=${set('to')}>
+            <option value="" ?selected=${input.to === ''}>Choose an envelope</option>
+            ${targets.map(([id, x]) => html`<option value=${id} ?selected=${id === input.to}>${x.name}</option>`)}
+          </select>
+        </label>
+        <input name="date" type="date" .value=${input.date} @input=${set('date')} required />
+        <input name="memo" .value=${input.memo} @input=${set('memo')} placeholder="Memo (optional)" autocomplete="off" />
+        <button class="primary" type="submit" ?disabled=${this.busy}>Move</button>
+        <button class="link" type="button" @click=${() => (this.moving = null)}>Cancel</button>
       </form>
     `;
   }
@@ -387,6 +485,51 @@ export class BudgetView extends LitElement {
             </table></div>`}
       </section>
     `;
+  }
+
+  private renderBudgetable(chart: Chart) {
+    const accounts = holdingAccounts(chart, this.budget);
+    return html`
+      <section>
+        <h3>Budgetable accounts</h3>
+        <p class="note intro">
+          The accounts whose money you budget, usually checking, savings you spend from, and credit cards. Their
+          balances, less what the envelopes hold, are To Be Budgeted. A card's balance owed counts against it, so
+          spending on the card from an envelope leaves To Be Budgeted as it is.
+        </p>
+        ${accounts.length === 0
+          ? html`<div class="empty">No asset or liability accounts yet. Add them in Accounts.</div>`
+          : html`<div class="scroll"><table>
+              <thead><tr><th>Account</th><th class="num">Balance</th><th>Budgetable</th></tr></thead>
+              <tbody>
+                ${accounts.map(({ id, path }) => {
+                  const a = chart.get(id)!;
+                  const on = this.budget.budgetable.includes(id);
+                  const bal = balanceOf(this.balances, id, a.cur);
+                  return html`<tr>
+                    <td>${path.join(' › ')}${a.closed_at !== undefined ? html` <span class="meta">closed</span>` : nothing}</td>
+                    <td class="num ${bal.amount < 0n ? 'negative' : ''}" title="As it counts toward To Be Budgeted">
+                      ${formatAmount(bal)} <span class="cur">${a.cur}</span>
+                    </td>
+                    <td>
+                      <input type="checkbox" .checked=${on} ?disabled=${this.busy}
+                        aria-label=${`${path.join(' › ')} is budgetable`}
+                        @change=${(ev: Event) => this.setBudgetable(id, ev)} />
+                    </td>
+                  </tr>`;
+                })}
+              </tbody>
+            </table></div>`}
+      </section>
+    `;
+  }
+
+  private setBudgetable(account: AccountId, e: Event) {
+    const box = e.target as HTMLInputElement;
+    const on = box.checked;
+    void this.save((doc) => withBudgetable(doc, account, on)).then((ok) => {
+      if (!ok) box.checked = !on;
+    });
   }
 
   private async add(e: Event) {
@@ -469,13 +612,23 @@ export class BudgetView extends LitElement {
     this.posted = '';
     this.error = '';
     this.scheduling = null;
+    this.moving = null;
     this.allocating = { envelope, amount: '', date: today(), memo: '' };
+  }
+
+  private startMoving(from: EnvelopeId) {
+    this.posted = '';
+    this.error = '';
+    this.allocating = null;
+    this.scheduling = null;
+    this.moving = { from, to: '', amount: '', date: today(), memo: '' };
   }
 
   private startScheduling(envelope: EnvelopeId) {
     this.posted = '';
     this.error = '';
     this.allocating = null;
+    this.moving = null;
     this.scheduling = { envelope, from: monthOf(today()), amount: '' };
   }
 
@@ -551,6 +704,32 @@ export class BudgetView extends LitElement {
       });
       this.allocating = null;
       this.posted = `Allocated ${formatAmount({ ...amount, cur: env.cur })} ${env.cur} to ${env.name}.`;
+    } catch (err) {
+      this.error = errorMessage(err);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async move(e: Event) {
+    e.preventDefault();
+    const input = this.moving;
+    if (!input) return;
+    const from = this.budget.envelopes[input.from];
+    const to = input.to ? this.budget.envelopes[input.to] : undefined;
+    this.error = '';
+    this.posted = '';
+    try {
+      if (!from || !input.to || !to) throw new ParseError('To: choose an envelope');
+      const amount = amountOf(input.amount, minor(from.cur), 'Amount');
+      if (!amount || amount.amount <= 0n) throw new ParseError('Amount: enter an amount greater than zero');
+      if (!isIsoDate(input.date)) throw new ParseError('Date: enter a date');
+      this.busy = true;
+      await this.ledger.postReallocation(
+        moveBetween(input.from, input.to, { ...amount, cur: from.cur }, input.date, input.memo.trim() || undefined),
+      );
+      this.moving = null;
+      this.posted = `Moved ${formatAmount({ ...amount, cur: from.cur })} ${from.cur} from ${from.name} to ${to.name}.`;
     } catch (err) {
       this.error = errorMessage(err);
     } finally {

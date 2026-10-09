@@ -296,6 +296,14 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   rival post makes it read again rather than post a month twice. It runs
   when the books open and after each schedule edit, and stops if the
   topic holds a message this version can't read.
+- Budgetable accounts and To Be Budgeted (0026). The Budget page marks
+  which asset and liability accounts are budgetable in `ledger/budget`,
+  and shows To Be Budgeted per commodity from the projection's new
+  `toBeBudgeted` query: budgetable balances less what every envelope
+  has available. Each open envelope has a Move action that posts one
+  `ledger.reallocation` to another open envelope in the same commodity.
+  The chart of accounts has the same Budgetable checkbox on each asset
+  and liability account. Core adds `withBudgetable` and `moveBetween`.
 
 ### Changed
 

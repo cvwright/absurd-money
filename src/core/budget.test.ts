@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { commodity } from './amount.js';
 import {
-  budgetableAccounts, budgetUpdateProblems, EMPTY_BUDGET, pairedTo, pairings, withEnvelope, withPairing,
+  budgetableAccounts, budgetUpdateProblems, EMPTY_BUDGET, moveBetween, pairedTo, pairings, withBudgetable,
+  withEnvelope, withPairing,
 } from './budget.js';
 import type { EnvelopeId } from './ids.js';
 import type { Allocation, BudgetDoc, Reallocation } from './messages.js';
@@ -133,5 +134,37 @@ describe('editing the budget', () => {
     ]);
     const unpaired = withPairing(closed, A.dining, null);
     expect(budgetUpdateProblems(budgetDoc, { ...unpaired, rev: 2 }, chart)).toEqual([]);
+  });
+
+  it('adds and removes budgetable accounts without repeats', () => {
+    const off = withBudgetable(budgetDoc, A.checking, false);
+    expect(off.budgetable).toEqual([A.visa]);
+    expect(withBudgetable(off, A.checking, false).budgetable).toEqual([A.visa]);
+    const on = withBudgetable(off, A.vti, true);
+    expect(withBudgetable(on, A.vti, true).budgetable).toEqual([A.visa, A.vti]);
+    expect(budgetUpdateProblems(budgetDoc, { ...on, rev: 2 }, chart)).toEqual([]);
+    expect(budgetUpdateProblems(budgetDoc, { ...withBudgetable(on, A.salary, true), rev: 2 }, chart)).toEqual([
+      `budgetable ${A.salary}: not an asset or liability account`,
+    ]);
+  });
+});
+
+describe('moveBetween', () => {
+  const amount = { amount: 5000n, exp: 2, cur: commodity('USD') };
+
+  it('builds a two-leg reallocation that passes the post-time rules', () => {
+    const m = moveBetween(E.dining, E.groceries, amount, day('2026-10-14'), 'Hosting');
+    expect(m).toEqual({
+      v: 1, date: '2026-10-14', cur: 'USD', memo: 'Hosting',
+      legs: [{ envelope: E.dining, amount: -5000n, exp: 2 }, { envelope: E.groceries, amount: 5000n, exp: 2 }],
+    });
+    expect(reallocationPostProblems(m, budgetDoc)).toEqual([]);
+    expect(moveBetween(E.dining, E.groceries, amount, day('2026-10-14'))).not.toHaveProperty('memo');
+  });
+
+  it('refuses a move to the same envelope or of nothing', () => {
+    expect(() => moveBetween(E.dining, E.dining, amount, day('2026-10-14'))).toThrow();
+    expect(() => moveBetween(E.dining, E.groceries, { ...amount, amount: 0n }, day('2026-10-14'))).toThrow();
+    expect(() => moveBetween(E.dining, E.groceries, { ...amount, amount: -1n }, day('2026-10-14'))).toThrow();
   });
 });

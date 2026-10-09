@@ -443,6 +443,12 @@ describe('Projection', () => {
       [E.groceries, { amount: 110000n - 8423n, exp: 2, cur: USD }],
       [E.dining, { amount: 10000n - 2311n, exp: 2, cur: USD }],
     ]));
+    // Checking is budgetable and down 8423 + 2311; the envelopes hold 120000 less the same.
+    expect(p.toBeBudgeted()).toEqual(new Map([[USD, { amount: -120000n, exp: 2, cur: USD }]]));
+    p.append('journal-2026', [
+      j('pay', 'ledger.entry', entry('2026-02-28', [usd(A.checking, 200000), usd(A.salary, -200000)])),
+    ]);
+    expect(p.toBeBudgeted()).toEqual(new Map([[USD, { amount: 80000n, exp: 2, cur: USD }]]));
   });
 
   it('derives cleared status from standing reconciliations', () => {

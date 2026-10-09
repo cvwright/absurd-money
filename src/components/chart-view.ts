@@ -7,15 +7,17 @@
  * `accounts-changed` with the document written. Each account shows its balance from the
  * projection, kept current as messages arrive. Clicking an account's name fires
  * `account-selected` to open its register. Envelopes and budgetable accounts are in
- * `ledger/budget`, managed by the budget view.
+ * `ledger/budget`, managed by the budget view; each asset and liability account also has a
+ * Budgetable checkbox here, which writes that document through `LedgerSpace.updateBudget`.
  */
 
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { isCommodity, type Commodity } from '@/core/amount.js';
+import { EMPTY_BUDGET, withBudgetable } from '@/core/budget.js';
 import type { Balances } from '@/core/fold/ledger.js';
 import { newAccountId, type AccountId } from '@/core/ids.js';
-import { ACCOUNT_TYPES, type Account, type AccountsDoc, type AccountType } from '@/core/messages.js';
+import { ACCOUNT_TYPES, type Account, type AccountsDoc, type AccountType, type BudgetDoc } from '@/core/messages.js';
 import type { ProjectionClient } from '@/projection/client.js';
 import type { LedgerSpace } from '@/services/ledger-space.js';
 import { InvalidDocError } from '@/services/state-store.js';
@@ -204,6 +206,15 @@ export class ChartView extends LitElement {
       font-family: var(--font-family-mono);
     }
 
+    label.budgetable {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+      color: var(--color-text-secondary);
+      font-size: var(--font-size-sm);
+      white-space: nowrap;
+    }
+
     .actions button {
       color: var(--color-text-secondary);
       font-size: var(--font-size-sm);
@@ -231,13 +242,14 @@ export class ChartView extends LitElement {
   @state() private newType: AccountType = 'asset';
   @state() private renaming: AccountId | null = null;
   @state() private balances: Balances | null = null;
+  @state() private budget: BudgetDoc | null = null;
 
-  private readonly onChange = () => void this.loadBalances();
+  private readonly onChange = () => void this.load();
 
   connectedCallback() {
     super.connectedCallback();
     this.projection?.addEventListener('change', this.onChange);
-    void this.loadBalances();
+    void this.load();
   }
 
   disconnectedCallback() {
@@ -245,12 +257,19 @@ export class ChartView extends LitElement {
     this.projection?.removeEventListener('change', this.onChange);
   }
 
-  private async loadBalances() {
+  private async load() {
     if (!this.projection) return;
     try {
-      this.balances = await this.projection.call('balances');
+      const [balances, budget] = await Promise.all([
+        this.projection.call('balances'),
+        this.projection.call('doc', 'ledger/budget') as Promise<BudgetDoc | undefined>,
+      ]);
+      this.balances = balances;
+      // A document just written here may not have synced back yet.
+      const doc = budget ?? EMPTY_BUDGET;
+      if (!this.budget || doc.rev >= this.budget.rev) this.budget = doc;
     } catch (err) {
-      console.warn('[chart-view] balances unavailable:', err);
+      console.warn('[chart-view] projection unavailable:', err);
     }
   }
 
@@ -324,6 +343,7 @@ export class ChartView extends LitElement {
         ${closed ? html`<span class="meta">closed ${account.closed_at}</span>` : nothing}
         <span class="balance">${this.balanceText(id, account)}</span>
         <span class="cur">${account.cur}</span>
+        ${this.renderBudgetable(id, account)}
         <span class="actions">
           <button type="button" ?disabled=${this.busy} @click=${() => (this.renaming = id)}>Rename</button>
           ${closed
@@ -332,6 +352,35 @@ export class ChartView extends LitElement {
         </span>
       </li>
     `;
+  }
+
+  /** Whether an asset or liability account counts toward To Be Budgeted, once the budget is loaded. */
+  private renderBudgetable(id: AccountId, account: Account) {
+    if (!this.budget || (account.type !== 'asset' && account.type !== 'liability')) return nothing;
+    const on = this.budget.budgetable.includes(id);
+    if (account.closed_at !== undefined && !on) return nothing;
+    return html`
+      <label class="budgetable" title="Counts toward To Be Budgeted">
+        <input type="checkbox" .checked=${on} ?disabled=${this.busy}
+          @change=${(e: Event) => this.setBudgetable(id, e)} />
+        Budgetable
+      </label>
+    `;
+  }
+
+  private async setBudgetable(id: AccountId, e: Event) {
+    const box = e.target as HTMLInputElement;
+    const on = box.checked;
+    this.busy = true;
+    this.error = '';
+    try {
+      this.budget = await this.ledger.updateBudget((doc) => withBudgetable(doc, id, on));
+    } catch (err) {
+      box.checked = !on;
+      this.error = message(err);
+    } finally {
+      this.busy = false;
+    }
   }
 
   private async add(e: Event) {
