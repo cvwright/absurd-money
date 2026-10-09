@@ -36,3 +36,8 @@ SDK helpers like `enableOpaque` are affected.
 - This is an upstream fix in reeeductio. Until it lands, consider
   retrying `enableOpaque` on `ChainError` in `LedgerSpace.setPassword`;
   it is idempotent.
+- The upstream fix is tracked as item 23 in reeeductio's
+  [TODO.md](https://github.com/reeeductio/reeeductio/blob/main/TODO.md).
+  Revisit this issue once it lands: bump the SDK, check that
+  `setPassword` passes without a retry, and remove the retry and any
+  interim workaround.

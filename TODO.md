@@ -8,9 +8,6 @@ Next ID: 0055
 
 ## Milestone 1: Core ledger
 
-- [ ] [0052](issues/0052-sdk-state-head-clock.md) SDK state writes
-      fail with 409 when the server's clock is ahead (setting a
-      password on a fresh space)
 - [ ] [0051](issues/0051-change-password.md) Changing the password:
       the server can't replace an OPAQUE registration, so "Change
       password" fails with 409
@@ -50,3 +47,6 @@ Next ID: 0055
 - [ ] 0031 Sharing: second user, roles, accountant read-only hand-off
 - [ ] 0032 SDK client constructed from topic keys, for sharing a single
       year (deferred)
+- [ ] [0052](issues/0052-sdk-state-head-clock.md) SDK state writes
+      fail with 409 when the server's clock is ahead (setting a
+      password on a fresh space)
