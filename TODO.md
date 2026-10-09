@@ -23,8 +23,6 @@ Next ID: 0055
 
 ## Milestone 4: Envelope budgeting
 
-- [ ] 0025 Budget schedule in `ledger/budget`, with idempotent
-      materialization of allocations
 - [ ] 0026 Budgetable accounts, the To Be Budgeted calculation, and
       moving money between envelopes
 - [ ] [0050](issues/0050-budget-this.md) "Budget this" on an expense

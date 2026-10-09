@@ -748,6 +748,14 @@ A **`Step`** is `{"from": Month, "amount": Int, "exp": Exp}`, in the
 envelope's `cur`. It sets the monthly allocation from that month until
 the next step. `amount` may be `"0"` to stop allocating.
 
+The client materializes the schedule when the books open and after a
+schedule edit: for each open envelope, and each month from its first
+step through the current month whose step is non-zero, it posts a
+`ledger.allocation` dated the first of that month with the `idem` for
+that envelope and month, unless the `budget` topic already holds one.
+A closed envelope gets none. A month already materialized keeps what it
+got, so editing a past step changes only the months not yet posted.
+
 Rules:
 
 - Envelopes are never removed; they are closed. An ID is never reused.

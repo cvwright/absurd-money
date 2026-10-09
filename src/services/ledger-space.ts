@@ -9,8 +9,8 @@
  * (`ledger/import-profiles`), the `import/v1` labels of statement rows (0023), posting
  * entries, reversals, edits, and dismissals to the journal, period closes to
  * `checkpoints`, statement reconciliations to `recon`, envelope allocations and
- * reallocations to `budget`, receipts and imported files as encrypted blobs, reading a
- * journal segment, and fetching and decrypting messages for the sync (sync.ts). A post that loses the race for its
+ * reallocations to `budget`, materializing the budget schedule (0025), receipts and
+ * imported files as encrypted blobs, reading a journal segment, and fetching and decrypting messages for the sync (sync.ts). A post that loses the race for its
  * topic's chain is retried against the new head (topic-append.ts).
  */
 
@@ -24,13 +24,14 @@ import type { RawMessage } from '@/core/fold/segment.js';
 import type { ImportRow } from '@/core/csv-import.js';
 import { editPostProblems, packEdits, type EditTarget } from '@/core/edit.js';
 import {
-  base64url, isBlobId, newPayeeId, segmentOf, yearOf, type AccountId, type BlobRef, type Label, type MsgId, type PayeeId,
+  base64url, isBlobId, newPayeeId, segmentOf, yearOf, type AccountId, type BlobRef, type Label, type Month, type MsgId,
+  type PayeeId,
 } from '@/core/ids.js';
 import { EMPTY_PROFILES, profilesUpdateProblems } from '@/core/import-profiles.js';
 import { dismissPostProblems, labelRows, packDismissals, type DismissRow, type LabeledRow } from '@/core/import-ids.js';
 import { EMPTY_JOURNAL, journalUpdateProblems, withYear } from '@/core/journal.js';
 import { parseJsonBytes } from '@/core/json.js';
-import { deriveLabelKeys, type LabelKeys } from '@/core/labels.js';
+import { allocationLabel, deriveLabelKeys, type LabelKeys } from '@/core/labels.js';
 import {
   encodeMessage, isStatePath, TOPIC_TYPES, type AccountsDoc, type Allocation, type BudgetDoc, type Edit, type Entry,
   type ImportProfilesDoc, type MessageTypes, type PayeesDoc, type Reallocation, type Recon, type Reversal,
@@ -43,6 +44,7 @@ import { reversalPostProblems, type ReversalTarget } from '@/core/reversal.js';
 import { allocationPostProblems, entryPostProblems, reallocationPostProblems } from '@/core/validate.js';
 import type { LogMessage } from '@/projection/projection.js';
 import { OWNER_USERNAME, type SpaceCredentials } from './credentials.js';
+import { materializeSchedule } from './materialize.js';
 import {
   loadDoc,
   StaleHeadError,
@@ -131,6 +133,8 @@ export class LedgerSpace {
   private readonly listedYears = new Set<number>();
   /** The label keys, derived once from the space's root and dropped with this object. */
   private readonly labelKeys: LabelKeys;
+  /** The materialization in progress, shared by every caller until it settles. */
+  private materializing: Promise<number> | null = null;
 
   constructor(creds: SpaceCredentials) {
     this.space = new Space({
@@ -464,6 +468,30 @@ export class LedgerSpace {
     return (await appendMessage(this.topics, 'budget', 'ledger.reallocation', () => data)) as MsgId;
   }
 
+  /**
+   * Posts the allocations the budget schedule calls for through `through` that `budget`
+   * doesn't hold yet (materialize.ts), against the latest budget document. Returns how
+   * many were posted. Run on opening the books and after a schedule edit; a call made
+   * while one is in progress waits for it rather than starting another.
+   */
+  materializeSchedule(through: Month): Promise<number> {
+    this.materializing ??= (async () => {
+      try {
+        const budget = await this.loadBudget();
+        const topic = {
+          read: () => this.readTopic('budget'),
+          post: (data: Uint8Array, prev: string | null) => this.topics.post('budget', 'ledger.allocation', data, prev),
+        };
+        return await materializeSchedule(topic, budget, through, (env, month) =>
+          allocationLabel(this.labelKeys, env, month),
+        );
+      } finally {
+        this.materializing = null;
+      }
+    })();
+    return this.materializing;
+  }
+
   /** Encrypts `bytes` under a fresh key and uploads them, for an entry's `receipts` or `source`. */
   async uploadReceipt(bytes: Uint8Array): Promise<BlobRef> {
     await this.authenticate();
@@ -510,8 +538,12 @@ export class LedgerSpace {
    *
    * Throws `ChainBrokenError` if the messages don't form one chain.
    */
-  async readSegment(year: number): Promise<RawMessage[]> {
-    const topic = segmentOf(year);
+  readSegment(year: number): Promise<RawMessage[]> {
+    return this.readTopic(segmentOf(year));
+  }
+
+  /** Every message on `topic`, decrypted, in chain order. See `readSegment`. */
+  private async readTopic(topic: string): Promise<RawMessage[]> {
     await this.authenticate();
     const messages = chainOrder(await allMessages(this.space, topic), (m) => ({
       hash: m.message_hash,

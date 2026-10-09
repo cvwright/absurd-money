@@ -6,7 +6,8 @@
  * recovery key. Unlocked, it connects to the space, opens the local projection and keeps it
  * in sync, and shows the chart of accounts, an account's register, a new entry, the
  * envelope budget, the opening balances, CSV import, statement reconciliation, or the
- * period closes. After creating a new space it shows the recovery key once, since nothing
+ * period closes. On opening the books it posts the allocations the budget schedule calls
+ * for that no device has posted yet (0025). After creating a new space it shows the recovery key once, since nothing
  * else can bring the books back if the passkeys and password are lost, and then asks how to
  * unlock them.
  *
@@ -20,7 +21,7 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import { decodeUrlSafeBase64, setLogLevel } from 'reeeductio';
-import type { AccountId } from '@/core/ids.js';
+import { monthOf, type AccountId } from '@/core/ids.js';
 import type { AccountsDoc } from '@/core/messages.js';
 import {
   clearBooks,
@@ -42,6 +43,7 @@ import { LedgerSpace } from '@/services/ledger-space.js';
 import { LiveProjection, type StatusEvent, type SyncStatus } from '@/services/live-projection.js';
 import { createPasskey, passkeysSupported } from '@/services/passkey.js';
 import { clearReconSessions } from '@/services/recon-session.js';
+import { today } from './dates.js';
 import type { ReEnter } from './entry-view.js';
 import { errorMessage } from './forms.js';
 import type { ProtectReason, ProtectView, SetPasswordDetail } from './protect-view.js';
@@ -579,6 +581,9 @@ export class MoneyApp extends LitElement {
     this.live = live;
     this.ledger = ledger;
     this.accounts = accounts;
+    ledger.materializeSchedule(monthOf(today())).catch((err: unknown) => {
+      console.warn('[money-app] could not post scheduled allocations:', err);
+    });
     return true;
   }
 

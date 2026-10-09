@@ -287,6 +287,15 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   adds to its envelope, and To Be Budgeted is unchanged.
   `LedgerSpace.postReallocation` also refuses a leg naming a closed
   envelope.
+- Budget schedule (0025). The Budget page sets and removes an
+  envelope's monthly steps in `ledger/budget`.
+  `LedgerSpace.materializeSchedule` posts the allocations the schedule
+  calls for through the current month that the `budget` topic doesn't
+  hold yet, each dated the first of its month with its `allocation/v1`
+  `idem`. It reads the whole topic and posts on the head it read, so a
+  rival post makes it read again rather than post a month twice. It runs
+  when the books open and after each schedule edit, and stops if the
+  topic holds a message this version can't read.
 
 ### Changed
 

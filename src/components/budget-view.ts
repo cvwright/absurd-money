@@ -11,8 +11,11 @@
  * Pairing is timeless, so moving an expense account to another envelope moves all of its
  * spending, past and future. The view says how much before it does.
  *
- * Budgetable accounts, To Be Budgeted, and moves between envelopes come with 0026; the
- * monthly schedule with 0025.
+ * Each envelope may have a monthly schedule (0025): steps that each set the allocation from
+ * a month on. Saving a step posts the allocations it calls for, as opening the books does
+ * (`LedgerSpace.materializeSchedule`), back to the step's month if it is in the past.
+ *
+ * Budgetable accounts, To Be Budgeted, and moves between envelopes come with 0026.
  */
 
 import { LitElement, html, css, nothing } from 'lit';
@@ -22,19 +25,33 @@ import { budgetRefProblems, EMPTY_BUDGET, pairedTo, withEnvelope, withPairing } 
 import { accountLabel, accountPath, chartOf, type Chart } from '@/core/chart.js';
 import { ParseError } from '@/core/errors.js';
 import { balanceOf, type Balances } from '@/core/fold/ledger.js';
-import { isIsoDate, newEnvelopeId, type AccountId, type EnvelopeId } from '@/core/ids.js';
-import type { AccountsDoc, BudgetDoc, Envelope } from '@/core/messages.js';
+import { isIsoDate, isMonth, monthOf, newEnvelopeId, type AccountId, type EnvelopeId, type Month } from '@/core/ids.js';
+import type { AccountsDoc, BudgetDoc, Envelope, ScheduleStep } from '@/core/messages.js';
+import { nextMonth, stepAt, withSchedule, withStep, withoutStep } from '@/core/schedule.js';
 import type { ProjectionClient } from '@/projection/client.js';
 import type { LedgerSpace } from '@/services/ledger-space.js';
 import { today } from './dates.js';
 import { amountOf, comparePaths, errorMessage, formatAmount } from './forms.js';
 import { viewStyles } from './view-styles.js';
 
+interface StepInput {
+  envelope: EnvelopeId;
+  from: string;
+  amount: string;
+}
+
 interface AllocationInput {
   envelope: EnvelopeId;
   amount: string;
   date: string;
   memo: string;
+}
+
+/** How many months from `from` through `through`, inclusive. */
+function monthsBetween(from: Month, through: Month): number {
+  let n = 0;
+  for (let m = from; m <= through; m = nextMonth(m)) n++;
+  return n;
 }
 
 /** The envelopes by name, open ones only unless `showClosed`. */
@@ -142,6 +159,14 @@ export class BudgetView extends LitElement {
       form.allocate input[name='memo'] {
         flex: 1 1 120px;
       }
+
+      .schedule {
+        margin: var(--spacing-xs) 0 var(--spacing-sm);
+      }
+
+      .schedule li {
+        padding: 0 var(--spacing-sm);
+      }
     `,
   ];
 
@@ -158,6 +183,7 @@ export class BudgetView extends LitElement {
   @state() private posted = '';
   @state() private renaming: EnvelopeId | null = null;
   @state() private allocating: AllocationInput | null = null;
+  @state() private scheduling: StepInput | null = null;
 
   private readonly onChange = () => void this.load();
 
@@ -252,15 +278,20 @@ export class BudgetView extends LitElement {
           <span class="actions">
             ${closed
               ? nothing
-              : html`<button type="button" ?disabled=${this.busy} @click=${() => this.startAllocating(id)}>Allocate</button>`}
+              : html`<button type="button" ?disabled=${this.busy} @click=${() => this.startAllocating(id)}>Allocate</button>
+                  <button type="button" ?disabled=${this.busy} @click=${() => this.startScheduling(id)}>Schedule</button>`}
             <button type="button" ?disabled=${this.busy} @click=${() => (this.renaming = id)}>Rename</button>
             ${closed
               ? html`<button type="button" ?disabled=${this.busy} @click=${() => this.reopen(id)}>Reopen</button>`
               : html`<button type="button" ?disabled=${this.busy} @click=${() => this.close(id, e, avail)}>Close</button>`}
           </span>
         </div>
-        <div class="hint">${funds.length > 0 ? `Spent from by ${funds.join(', ')}` : 'No expense accounts spend from it.'}</div>
+        <div class="hint">
+          ${funds.length > 0 ? `Spent from by ${funds.join(', ')}` : 'No expense accounts spend from it.'}
+          ${this.scheduleSummary(e)}
+        </div>
         ${this.allocating?.envelope === id ? this.renderAllocate(this.allocating) : nothing}
+        ${this.scheduling?.envelope === id ? this.renderSchedule(e, this.scheduling) : nothing}
       </li>
     `;
   }
@@ -278,6 +309,47 @@ export class BudgetView extends LitElement {
         <button class="primary" type="submit" ?disabled=${this.busy}>Allocate</button>
         <button class="link" type="button" @click=${() => (this.allocating = null)}>Cancel</button>
       </form>
+    `;
+  }
+
+  /** The monthly allocation in effect this month, and the next change, if any. */
+  private scheduleSummary(e: Envelope) {
+    if (!e.schedule || e.closed_at !== undefined) return nothing;
+    const month = monthOf(today());
+    const now = stepAt(e.schedule, month);
+    const upcoming = e.schedule.find((s) => s.from > month);
+    const parts: string[] = [];
+    if (now && now.amount !== 0n) parts.push(`${formatAmount({ ...now, cur: e.cur })} a month`);
+    if (upcoming) parts.push(`${formatAmount({ ...upcoming, cur: e.cur })} a month from ${upcoming.from}`);
+    return parts.length > 0 ? html` · Scheduled ${parts.join(', then ')}.` : nothing;
+  }
+
+  private renderSchedule(e: Envelope, input: StepInput) {
+    const set = (field: 'from' | 'amount') => (ev: Event) => {
+      this.scheduling = { ...input, [field]: (ev.target as HTMLInputElement).value };
+    };
+    const steps = e.schedule ?? [];
+    return html`
+      <div class="schedule">
+        ${steps.length === 0
+          ? html`<div class="hint">No schedule. Each step sets the monthly allocation from its month on.</div>`
+          : html`<ul>${steps.map((s) => html`<li class="row">
+              <span class="name">From ${s.from}: ${s.amount === 0n ? 'nothing' : `${formatAmount({ ...s, cur: e.cur })} a month`}</span>
+              <span class="actions">
+                <button type="button" ?disabled=${this.busy} @click=${() => this.removeStep(input.envelope, s)}>Remove</button>
+              </span>
+            </li>`)}</ul>`}
+        <form class="allocate" @submit=${this.addStep}>
+          <input name="from" type="month" .value=${input.from} @input=${set('from')} required title="First month" />
+          <input name="amount" .value=${input.amount} @input=${set('amount')} placeholder="Monthly amount" required
+            autocomplete="off" autofocus title="Zero stops allocating from that month" />
+          <button class="primary" type="submit" ?disabled=${this.busy}>Set</button>
+          <button class="link" type="button" @click=${() => (this.scheduling = null)}>Done</button>
+        </form>
+        <div class="hint">
+          A month already allocated by the schedule keeps what it got. A change applies to months not yet allocated.
+        </div>
+      </div>
     `;
   }
 
@@ -396,7 +468,67 @@ export class BudgetView extends LitElement {
   private startAllocating(envelope: EnvelopeId) {
     this.posted = '';
     this.error = '';
+    this.scheduling = null;
     this.allocating = { envelope, amount: '', date: today(), memo: '' };
+  }
+
+  private startScheduling(envelope: EnvelopeId) {
+    this.posted = '';
+    this.error = '';
+    this.allocating = null;
+    this.scheduling = { envelope, from: monthOf(today()), amount: '' };
+  }
+
+  private async addStep(e: Event) {
+    e.preventDefault();
+    const input = this.scheduling;
+    if (!input) return;
+    const env = this.budget.envelopes[input.envelope];
+    this.error = '';
+    this.posted = '';
+    let step: ScheduleStep;
+    try {
+      if (!env) throw new Error('That envelope is no longer in the budget.');
+      if (!isMonth(input.from)) throw new ParseError('From: enter a month');
+      const amount = amountOf(input.amount, minor(env.cur), 'Amount');
+      if (!amount || amount.amount < 0n) throw new ParseError('Amount: enter zero or more');
+      step = { from: input.from, amount: amount.amount, exp: amount.exp };
+    } catch (err) {
+      this.error = errorMessage(err);
+      return;
+    }
+    const month = monthOf(today());
+    if (step.from < month && step.amount !== 0n) {
+      const n = monthsBetween(step.from, month);
+      const ok = confirm(
+        `${step.from} is in the past. ${env.name} will be allocated ${formatAmount({ ...step, cur: env.cur })} ${env.cur} ` +
+          `for each of the ${n} months from ${step.from} through ${month} that the schedule hasn't allocated yet. Continue?`,
+      );
+      if (!ok) return;
+    }
+    if (await this.save((doc) => withEnvelope(doc, input.envelope, (x) => withSchedule(x, withStep(x.schedule, step))))) {
+      this.scheduling = { ...input, amount: '' };
+      await this.materialize();
+    }
+  }
+
+  private async removeStep(envelope: EnvelopeId, step: ScheduleStep) {
+    if (await this.save((doc) => withEnvelope(doc, envelope, (x) => withSchedule(x, withoutStep(x.schedule, step.from))))) {
+      await this.materialize();
+    }
+  }
+
+  /** Posts what the schedule now calls for through this month, and says how much that was. */
+  private async materialize() {
+    this.busy = true;
+    try {
+      const n = await this.ledger.materializeSchedule(monthOf(today()));
+      if (n > 0) this.posted = `Posted ${n} scheduled allocation${n === 1 ? '' : 's'}.`;
+    } catch (err) {
+      this.error = `The schedule was saved, but its allocations weren't posted: ${errorMessage(err)}`;
+    } finally {
+      this.busy = false;
+    }
   }
 
   private async allocate(e: Event) {
