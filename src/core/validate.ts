@@ -134,6 +134,13 @@ export function allocationProblems(msg: Allocation, budget: BudgetDoc): string[]
   return [];
 }
 
+/** Everything checked before posting an allocation: the fold-time rules, and the envelope is open. */
+export function allocationPostProblems(msg: Allocation, budget: BudgetDoc): string[] {
+  const problems = allocationProblems(msg, budget);
+  if (envelopeOf(budget, msg.envelope)?.closed_at !== undefined) problems.push('envelope is closed');
+  return problems;
+}
+
 export interface EntryPostContext {
   readonly chart: Chart;
   readonly payees?: PayeesDoc;

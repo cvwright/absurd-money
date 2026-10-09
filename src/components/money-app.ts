@@ -4,10 +4,11 @@
  * Root component. Without saved books it shows the setup view. With them it starts locked:
  * the keys are wrapped at rest (0033) and open only with a passkey, the password, or the
  * recovery key. Unlocked, it connects to the space, opens the local projection and keeps it
- * in sync, and shows the chart of accounts, an account's register, a new entry, the opening
- * balances, CSV import, statement reconciliation, or the period closes. After creating a new space it shows the recovery key
- * once, since nothing else can bring the books back if the passkeys and password are lost,
- * and then asks how to unlock them.
+ * in sync, and shows the chart of accounts, an account's register, a new entry, the
+ * envelope budget, the opening balances, CSV import, statement reconciliation, or the
+ * period closes. After creating a new space it shows the recovery key once, since nothing
+ * else can bring the books back if the passkeys and password are lost, and then asks how to
+ * unlock them.
  *
  * It locks after a period of inactivity or on request, which drops the keys, the
  * `LedgerSpace`, and the projection from memory.
@@ -53,6 +54,7 @@ import './chart-view.js';
 import './register-view.js';
 import './opening-view.js';
 import './entry-view.js';
+import './budget-view.js';
 import './reconcile-view.js';
 import './import-view.js';
 import './close-view.js';
@@ -69,12 +71,13 @@ type View =
   | { kind: 'ready' }
   | { kind: 'failed'; error: string };
 
-type Page = 'accounts' | 'register' | 'entry' | 'opening' | 'import' | 'reconcile' | 'close';
+type Page = 'accounts' | 'register' | 'entry' | 'budget' | 'opening' | 'import' | 'reconcile' | 'close';
 
 const PAGES: { page: Page; label: string }[] = [
   { page: 'accounts', label: 'Accounts' },
   { page: 'register', label: 'Register' },
   { page: 'entry', label: 'New entry' },
+  { page: 'budget', label: 'Budget' },
   { page: 'opening', label: 'Opening balances' },
   { page: 'import', label: 'Import' },
   { page: 'reconcile', label: 'Reconcile' },
@@ -385,6 +388,9 @@ export class MoneyApp extends LitElement {
       case 'entry':
         return html`<entry-view .ledger=${this.ledger!} .projection=${this.live!.projection} .doc=${this.accounts!}
           .reenter=${this.reEnter}></entry-view>`;
+      case 'budget':
+        return html`<budget-view .ledger=${this.ledger!} .projection=${this.live!.projection}
+          .doc=${this.accounts!}></budget-view>`;
       case 'opening':
         return html`<opening-view .ledger=${this.ledger!} .projection=${this.live!.projection}
           .doc=${this.accounts!}></opening-view>`;

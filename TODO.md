@@ -4,7 +4,7 @@ Open issues, grouped by milestone, in priority order. An issue is open
 if and only if it is listed here. See
 [issues/README.md](issues/README.md) for the workflow.
 
-Next ID: 0050
+Next ID: 0051
 
 ## Milestone 1: Core ledger
 
@@ -16,14 +16,14 @@ Next ID: 0050
 
 ## Milestone 4: Envelope budgeting
 
-- [ ] 0024 Envelopes in `ledger/budget`, and allocations on the `budget`
-      topic
 - [ ] [0037](issues/0037-reallocation.md) `ledger.reallocation` for
       moves between envelopes
 - [ ] 0025 Budget schedule in `ledger/budget`, with idempotent
       materialization of allocations
-- [ ] 0026 To Be Budgeted calculation, and moving money between
-      envelopes
+- [ ] 0026 Budgetable accounts, the To Be Budgeted calculation, and
+      moving money between envelopes
+- [ ] [0050](issues/0050-budget-this.md) "Budget this" on an expense
+      account: create and pair its envelope in one step
 
 ## Later
 

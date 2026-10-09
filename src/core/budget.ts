@@ -85,3 +85,24 @@ export function budgetUpdateProblems(prev: BudgetDoc, next: BudgetDoc, chart: Ch
   }
   return problems;
 }
+
+/** The expense accounts `doc` says are spent from `env`, whether or not each pairing counts. */
+export function pairedTo(doc: BudgetDoc, env: EnvelopeId): AccountId[] {
+  return (Object.entries(doc.spent_from) as [AccountId, EnvelopeId][]).filter(([, e]) => e === env).map(([a]) => a);
+}
+
+/**
+ * `doc` with `account` spent from `env`, or from no envelope if `env` is null. Pairing is
+ * timeless: the account's spending, past and future, moves to the new envelope.
+ */
+export function withPairing(doc: BudgetDoc, account: AccountId, env: EnvelopeId | null): BudgetDoc {
+  const { [account]: _, ...rest } = doc.spent_from;
+  return { ...doc, spent_from: env === null ? rest : { ...rest, [account]: env } };
+}
+
+/** `doc` with envelope `id` changed by `f`. Throws if there is no such envelope. */
+export function withEnvelope(doc: BudgetDoc, id: EnvelopeId, f: (e: Envelope) => Envelope): BudgetDoc {
+  const e = envelopeOf(doc, id);
+  if (!e) throw new Error('That envelope is no longer in the budget.');
+  return { ...doc, envelopes: { ...doc.envelopes, [id]: f(e) } };
+}

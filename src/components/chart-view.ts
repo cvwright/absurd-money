@@ -7,7 +7,7 @@
  * `accounts-changed` with the document written. Each account shows its balance from the
  * projection, kept current as messages arrive. Clicking an account's name fires
  * `account-selected` to open its register. Envelopes and budgetable accounts are in
- * `ledger/budget`, managed by the budgeting issues (0024).
+ * `ledger/budget`, managed by the budget view.
  */
 
 import { LitElement, html, css, nothing } from 'lit';

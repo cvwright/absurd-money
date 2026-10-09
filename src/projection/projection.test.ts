@@ -427,6 +427,16 @@ describe('Projection', () => {
       b('al2', 'ledger.allocation', { v: 1, date: '2026-02-01', envelope: E.groceries, amount: '60000', exp: 2, cur: 'USD' }),
     ]);
     expect(p.allocated().get(E.groceries)).toEqual({ amount: 120000n, exp: 2, cur: USD });
+
+    const j = chain();
+    p.append('journal-2026', [
+      j('shop', 'ledger.entry', entry('2026-02-14', [usd(A.checking, -8423), usd(A.groceries, 8423)])),
+      j('eat', 'ledger.entry', entry('2026-02-15', [usd(A.checking, -2311), usd(A.dining, 2311)])),
+    ]);
+    expect(p.available()).toEqual(new Map([
+      [E.groceries, { amount: 120000n - 8423n, exp: 2, cur: USD }],
+      [E.dining, { amount: -2311n, exp: 2, cur: USD }],
+    ]));
   });
 
   it('derives cleared status from standing reconciliations', () => {

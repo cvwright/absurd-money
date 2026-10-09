@@ -759,6 +759,13 @@ Rules:
   Groceries funds two). Pointing the other way would let two envelopes
   claim the same expense, and its spending would count twice. An expense
   account with no entry is spent from no envelope.
+- **Pairing is timeless**, like accounts. Changing an account's
+  `spent_from` moves all of its spending, past and future, to the new
+  envelope, and removing it returns that spending to no envelope. The
+  sum of envelope balances, and so To Be Budgeted, changes only when an
+  account gains or loses an envelope, not when it moves between two. To
+  change where spending goes from a date on, split the expense account
+  instead: close the old one and pair a new one.
 - **`budgetable` may include liabilities**, so credit cards can be
   budgeted. Otherwise a card purchase would lower an envelope without
   lowering any budgetable asset, and To Be Budgeted would go up. With

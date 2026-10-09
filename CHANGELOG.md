@@ -271,6 +271,14 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the uploaded file as `source`. A rule can be made from a row.
   `ledger/import-profiles` has post-time rules: profiles are never
   removed and never change their import ID scheme.
+- Budget page (0024). Add, rename, close, and reopen envelopes in
+  `ledger/budget`, choose the envelope each expense account is spent
+  from, and allocate money to an envelope as a `ledger.allocation` on
+  the `budget` topic. Each envelope shows what it has available, from
+  the projection's new `available` query. `LedgerSpace.postAllocation`
+  refuses an allocation to a closed envelope. Pairing is timeless:
+  re-pairing an expense account moves all of its spending, past and
+  future, and the page says how much before it does.
 
 ### Changed
 

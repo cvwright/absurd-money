@@ -26,7 +26,7 @@ import { chainOrder } from '@/core/chain.js';
 import { chartOf, EMPTY_CHART } from '@/core/chart.js';
 import { EMPTY_BUDGET } from '@/core/budget.js';
 import { CodecError } from '@/core/errors.js';
-import { foldBudget } from '@/core/fold/budget.js';
+import { envelopeAvailable, foldBudget } from '@/core/fold/budget.js';
 import { balances as foldBalances, type Balances, type BalanceWindow } from '@/core/fold/ledger.js';
 import { foldSegment, type Anomaly, type AnomalyKind, type RawMessage } from '@/core/fold/segment.js';
 import {
@@ -953,6 +953,16 @@ export class Projection {
       out.set(r.envelope as EnvelopeId, { amount: BigInt(r.amount as string), exp: r.exp as number, cur: commodity(r.cur as string) });
     }
     return out;
+  }
+
+  /**
+   * What each envelope in `ledger/budget` has available (core's `envelopeAvailable`): its
+   * allocations less the spending in the expense accounts spent from it, over all time.
+   */
+  available(): Map<EnvelopeId, Amount> {
+    const budget = this.doc('ledger/budget') ?? EMPTY_BUDGET;
+    const chart = chartOf(this.doc('ledger/accounts') ?? EMPTY_CHART);
+    return envelopeAvailable(budget, chart, this.allocated(), this.balances());
   }
 
   /**
