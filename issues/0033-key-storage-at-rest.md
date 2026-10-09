@@ -104,3 +104,6 @@ Deferred:
   fixed; see 0043's resolution.)
 - 0044: trying the passkey flow on real authenticators, as the notes
   above ask. It is untested on hardware.
+
+Later: 0056 dropped the inactivity lock. The app locks only from the
+Lock button, and unlocks again when the page is reopened.

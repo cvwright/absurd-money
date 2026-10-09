@@ -4,7 +4,7 @@ Open issues, grouped by milestone, in priority order. An issue is open
 if and only if it is listed here. See
 [issues/README.md](issues/README.md) for the workflow.
 
-Next ID: 0055
+Next ID: 0057
 
 ## Milestone 1: Core ledger
 
@@ -44,7 +44,10 @@ Next ID: 0055
       never.
 - [ ] [0034](issues/0034-non-extractable-keys.md) Non-extractable
       WebCrypto keys in memory (needs an SDK change)
-- [ ] 0031 Sharing: second user, roles, accountant read-only hand-off
+- [ ] [0031](issues/0031-sharing.md) Sharing: a second family member
+      with their own identity and full access
+- [ ] 0055 Sharing: the accountant's read-only hand-off of one year,
+      with an expiring role (needs 0032)
 - [ ] 0032 SDK client constructed from topic keys, for sharing a single
       year (deferred)
 - [ ] [0052](issues/0052-sdk-state-head-clock.md) SDK state writes

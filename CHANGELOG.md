@@ -317,6 +317,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The app no longer locks itself after 15 minutes without input. It
+  locks from the Lock button, and asks to unlock again when the page is
+  reopened or reloaded. The keys are still wrapped at rest (0056).
 - `LedgerSpace.postEntry` takes whether the entry's segment is open,
   from the projection, so an entry can't be posted to a frozen year
   (0016).

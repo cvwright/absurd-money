@@ -51,3 +51,6 @@ devices hold keys to the same space.
 - Recovery key import (0008) and OPAQUE login (0033) both produce raw
   bytes. Import them immediately and drop the buffers. JavaScript can't
   guarantee zeroing, so keep the window short.
+- The SDK side is filed as item 24 in reeeductio's
+  [TODO.md](https://github.com/reeeductio/reeeductio/blob/main/TODO.md).
+  Revisit this issue once it lands.

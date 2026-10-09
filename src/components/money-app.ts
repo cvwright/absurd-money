@@ -11,8 +11,9 @@
  * else can bring the books back if the passkeys and password are lost, and then asks how to
  * unlock them.
  *
- * It locks after a period of inactivity or on request, which drops the keys, the
- * `LedgerSpace`, and the projection from memory.
+ * It locks on request, which drops the keys, the `LedgerSpace`, and the projection from
+ * memory. It doesn't lock on its own (0056): the keys stay wrapped at rest, so closing or
+ * reloading the page is what asks for them again.
  *
  * Only one tab can have the projection open. Another tab waits, and takes over when
  * that one closes.
@@ -92,10 +93,6 @@ const STATUS_TEXT: Record<SyncStatus['kind'], string> = {
   offline: 'Offline',
   failed: 'Sync failed',
 };
-
-/** Locks after this long with no input, counting time in the background. */
-const LOCK_AFTER_MS = 15 * 60 * 1000;
-const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
 
 /** A record for books that have no way to unlock yet. */
 function draftBooks(creds: SpaceCredentials, password: boolean): SavedBooks {
@@ -271,24 +268,10 @@ export class MoneyApp extends LitElement {
   private creds: SpaceCredentials | null = null;
   /** Bumped on every lock and sign-out, so work started before it is abandoned. */
   private session = 0;
-  private lastActivity = Date.now();
-  private idleTimer: ReturnType<typeof setInterval> | undefined;
 
   connectedCallback() {
     super.connectedCallback();
-    for (const type of ACTIVITY_EVENTS) {
-      window.addEventListener(type, this.onActivity, { capture: true, passive: true });
-    }
-    document.addEventListener('visibilitychange', this.checkIdle);
-    this.idleTimer = setInterval(this.checkIdle, 30_000);
     void this.start();
-  }
-
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    for (const type of ACTIVITY_EVENTS) window.removeEventListener(type, this.onActivity, { capture: true });
-    document.removeEventListener('visibilitychange', this.checkIdle);
-    clearInterval(this.idleTimer);
   }
 
   /** Finds this device's books: locked, still in the clear from an older version, or none. */
@@ -497,7 +480,6 @@ export class MoneyApp extends LitElement {
       this.unlockView?.showError(passkeyMessage(err));
       return;
     }
-    this.lastActivity = Date.now();
     await this.open(creds);
   }
 
@@ -596,14 +578,6 @@ export class MoneyApp extends LitElement {
   private get canLock(): boolean {
     return this.creds !== null && !!this.books && (this.books.password || this.books.passkeys.length > 0);
   }
-
-  private readonly onActivity = () => {
-    this.lastActivity = Date.now();
-  };
-
-  private readonly checkIdle = () => {
-    if (this.canLock && Date.now() - this.lastActivity >= LOCK_AFTER_MS) this.lock();
-  };
 
   private readonly lock = () => {
     if (!this.canLock) return;
